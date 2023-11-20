@@ -1,0 +1,16 @@
+name: deep_momentum_networks
+channels:
+  - defaults
+dependencies:
+  - numpy
+  - pandas
+  - empyrical
+  - scikit-learn
+  - xgboost
+  - seaborn
+  - pyarrow
+  - joblib
+  - statsmodels
+  - pyyaml=5.4.1
+  - matplotlib
+
