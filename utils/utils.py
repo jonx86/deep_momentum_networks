@@ -225,12 +225,12 @@ def plot_strats(strats:pd.DataFrame, log_scale=True):
 
 def load_features()-> pd.DataFrame:
     """
-    
+    Creates the features if they don't already exist otherwise reads them from disk
     """
     try:
         feats = pd.read_parquet('features.parquet')
         return feats
-    else:
+    except Exception as e:
         tr_index = pd.read_parquet('tr_index.parquet')
         feats = build_features(tr_index)
 
