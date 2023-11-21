@@ -5,7 +5,9 @@ from sklearn.ensemble import  RandomForestRegressor
 from utils.utils import get_cv_splits, load_features
 
 from sklearn.metrics import mean_squared_error
+from sklear.grid_search import ParameterSampler
 from tqdm import tqdm
+
 
 # load the data
 feats = load_features()
@@ -26,6 +28,7 @@ baseRF = RandomForestRegressor(max_depth=5,
                                n_estimators=1000,
                                max_features=int(1),
                                n_jobs=-1)
+
 
 # NOTE - we can either frame as a regression or classification problem in this example we use regression
 predictions = []
