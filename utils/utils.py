@@ -282,3 +282,19 @@ def get_cv_splits(feats: pd.DataFrame, split_length: int=252*5):
         test = feats.loc[(feats.index.get_level_values('date')>split[1]) & (feats.index.get_level_values('date')<=split[2])]
         yield train, test 
        
+
+def train_val_split(X_train: pd.DataFrame, y_train: pd.DataFrame):
+    # train split
+    train_split = round(X_train.shape[0] * .90)
+
+    # Xtrain and ytrain
+    X_train2 = X_train.head(train_split)
+    y_train2 = y_train.head(train_split)
+    last_train_date = X_train2.index.get_level_values('date')[-1]
+
+    # X and y validation
+    X_val = X_train.loc[X_train.index.get_level_values('date')>last_train_date]
+    y_val = y_train.loc[y_train.index.get_level_values('date')>last_train_date]
+
+    return X_train2, X_val, y_train2, y_val
+    
