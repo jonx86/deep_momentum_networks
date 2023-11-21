@@ -2,9 +2,9 @@ name: deep_momentum_networks
 channels:
   - defaults
 dependencies:
+  - python==3.11.4
   - numpy
   - pandas
-  - empyrical
   - scikit-learn
   - xgboost
   - seaborn
@@ -13,4 +13,10 @@ dependencies:
   - statsmodels
   - pyyaml=5.4.1
   - matplotlib
-
+  - tqdm
+  - jupyter
+  - notebook
+  - pip
+  - pip:
+    - torch
+    - empyrical
