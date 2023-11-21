@@ -7,7 +7,7 @@ from pandas.tseries.offsets import BDay
 import empyrical as ep
 from joblib import Parallel, delayed    
 import statsmodels.api as sml
-
+from pathlib import Path
 
 
 def getPortVol(weights, cov, ann_factor=252):
@@ -227,15 +227,18 @@ def load_features()-> pd.DataFrame:
     """
     Creates the features if they don't already exist otherwise reads them from disk
     """
+
+    root = Path(__file__).parents[1].__str__()
+
     try:
-        feats = pd.read_parquet('features.parquet')
+        feats = pd.read_parquet(root+'\\'+'features.parquet')
         return feats
     except Exception as e:
-        tr_index = pd.read_parquet('tr_index.parquet')
+        tr_index = pd.read_parquet(root+'\\'+'future_total_return_index.parquet')
         feats = build_features(tr_index)
 
         # save out now 
-        feats.to_parquet('features.parquet')
+        feats.to_parquet(root+'\\''features.parquet')
         return feats
 
 
