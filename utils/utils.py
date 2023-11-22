@@ -231,14 +231,14 @@ def load_features()-> pd.DataFrame:
     root = Path(__file__).parents[1].__str__()
 
     try:
-        feats = pd.read_parquet(root+'\\'+'features.parquet')
+        feats = pd.read_parquet(root+'/'+'features.parquet')
         return feats
     except Exception as e:
-        tr_index = pd.read_parquet(root+'\\'+'future_total_return_index.parquet')
+        tr_index = pd.read_parquet(root+'/'+'future_total_return_index.parquet')
         feats = build_features(tr_index)
 
         # save out now 
-        feats.to_parquet(root+'\\'+'features.parquet')
+        feats.to_parquet(root+'/'+'features.parquet')
         return feats
 
 
