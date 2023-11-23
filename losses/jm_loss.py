@@ -61,7 +61,7 @@ class RegressionLoss(nn.Module):
         return -loss
     
 
-class BinaryClassificationLoss(nn.Model):
+class BinaryClassificationLoss(nn.Module):
     def __init__(self):
         super(BinaryClassificationLoss, self).__init__()
     
@@ -73,9 +73,10 @@ class BinaryClassificationLoss(nn.Model):
     
 
 if __name__ == "__main__":
+    import pandas as pd
   
-
-    for _ in range(50):
+    s = pd.Series()
+    for x in range(500):
         i = np.random.randn(72, 1)
         i = torch.tensor(i)
         i = torch.tanh(i)
@@ -88,6 +89,12 @@ if __name__ == "__main__":
         l = SharpeLoss()
         f = l.forward(i, target)
         print(f)
+
+        extracted_val = float(f.cpu().numpy())
+        s.loc[x] = extracted_val
+    
+    # plots the losses
+    s.plot(kind='hist', bins=25, title='dist of losses')
 
 
 
