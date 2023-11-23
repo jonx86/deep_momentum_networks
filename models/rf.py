@@ -2,7 +2,11 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import  RandomForestRegressor
 
-from utils.utils import get_cv_splits, load_features, train_val_split, process_jobs, get_returns_breakout
+from utils.utils import (get_cv_splits,
+                         load_features,
+                         train_val_split,
+                         process_jobs,
+                         get_returns_breakout)
 
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import ParameterSampler
