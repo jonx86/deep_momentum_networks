@@ -19,6 +19,9 @@ from utils.utils import load_features, get_cv_splits, train_val_split, process_j
 import os
 
 
+outfile = open("outputs", "w")
+
+
 class AverageMeter(object):
     def __init__(self):
         self.reset()
@@ -148,99 +151,102 @@ learning_rate = 0.001
 maximum_gradient_norm = 0.01
 
 
-outputs = [0] * 6
+if os.path.exists(model_path):
+    os.remove(model_path)
+predictions = [0] * 6
+# now start the loop
+for idx, (train, test) in enumerate(get_cv_splits(X)):
+    learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
+    iter_time = AverageMeter()
+    train_losses = AverageMeter()
 
-for split in [0,4]:
-    predictions = []
-    # now start the loop
-    for idx, (train, test) in enumerate(get_cv_splits(X)):
-        if idx != split:
-            continue
+    # break out X and y train
+    X_train, y_train = train[features], train[target]
+    X_test, y_test = test[features], test[target]
 
-        learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
-        iter_time = AverageMeter()
-        train_losses = AverageMeter()
+    # validation split
+    X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
 
-        # break out X and y train
-        X_train, y_train = train[features], train[target]
-        X_test, y_test = test[features], test[target]
+    scaler = RobustScaler()
+    X_train = scaler.fit_transform(X_train)
 
-        # validation split
-        X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
+    # now scaler X_train2 and Xval
+    X_train2 = scaler.transform(X_train2)
+    X_val = scaler.transform(X_val)
 
-        scaler = RobustScaler()
-        X_train = scaler.fit_transform(X_train)
+    # our data-loaders
+    dataloader = load_data_torch(X_train2, y_train2, batch_size=batch_size)
+    valdataloader = load_data_torch(X_val, y_val, batch_size=batch_size)
 
-        # now scaler X_train2 and Xval
-        X_train2 = scaler.transform(X_train2)
-        X_val = scaler.transform(X_val)
-
-        # our data-loaders
-        dataloader = load_data_torch(X_train2, y_train2, batch_size=batch_size)
-        valdataloader = load_data_torch(X_val, y_val, batch_size=batch_size)
-
-        # model
-        model = MLP(lookback_size=5, input_size=number_of_features, hidden_size=hidden_size, dropout=dropout, device=device)
-        if os.path.exists(model_path):
-            model.load_state_dict(torch.load(model_path))
-        model.to(torch.device('cuda'))
-
-        optimizer = Adam(model.parameters(), lr=learning_rate)
-        loss_func = SharpeLoss()
-
-        early_stop_count = 0
-        best_val_loss = float('inf')
-        for epoch in range(epochs):
-            train_loss = train_model(epoch, model, dataloader, optimizer, loss_func, maximum_gradient_norm)
-            val_loss = validate_model(epoch, model, valdataloader, loss_func)
-
-            learning_curves.loc[epoch, 'train_loss'] = train_loss
-            learning_curves.loc[epoch, 'val_loss'] = val_loss
-
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                torch.save(model.state_dict(), model_path)
-                early_stop_count = 0
-            else:
-                early_stop_count += 1
-
-            if early_stop_count == early_stopping:
-                break
-
-        learning_curves.plot()
-        plt.title(f'CV Split: {idx}')
-        plt.savefig(f'learning_curves_{idx}.png')
-        plt.clf()
-
-        # scale
-        X_test2 = X_test.copy()
-        X_test2 = scaler.transform(X_test2)
-
-        X_test2 = torch.tensor(X_test2, dtype=torch.float32)
-        X_test2 = X_test2.cuda()
-
+    # model
+    model = MLP(lookback_size=5, input_size=number_of_features, hidden_size=hidden_size, dropout=dropout, device=device)
+    if os.path.exists(model_path):
+        print('model loaded')
         model.load_state_dict(torch.load(model_path))
-        with torch.no_grad():
-            model.eval()
-            preds = model(X_test2)
-            preds = preds.cpu().detach().numpy()
-            preds=preds.reshape(preds.shape[0], )
-            preds = pd.Series(data=preds, index=y_test.index)
-            predictions.append(preds)
+        os.remove(model_path)
+    model.to(torch.device('cuda'))
 
-    preds=pd.concat(predictions).sort_index()
+    optimizer = Adam(model.parameters(), lr=learning_rate)
+    loss_func = SharpeLoss()
+
+    early_stop_count = 0
+    best_val_loss = float('inf')
+    for epoch in range(epochs):
+        train_loss = train_model(epoch, model, dataloader, optimizer, loss_func, maximum_gradient_norm)
+        val_loss = validate_model(epoch, model, valdataloader, loss_func)
+
+        learning_curves.loc[epoch, 'train_loss'] = train_loss
+        learning_curves.loc[epoch, 'val_loss'] = val_loss
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model.state_dict(), model_path)
+            early_stop_count = 0
+        else:
+            early_stop_count += 1
+
+        if early_stop_count == early_stopping:
+            break
+
+    learning_curves.plot()
+    plt.title(f'CV Split: {idx}')
+    plt.savefig(f'learning_curves_{idx}.png')
+    plt.clf()
+
+    # scale
+    X_test2 = X_test.copy()
+    X_test2 = scaler.transform(X_test2)
+
+    X_test2 = torch.tensor(X_test2, dtype=torch.float32)
+    X_test2 = X_test2.cuda()
+
+    model.load_state_dict(torch.load(model_path))
+    with torch.no_grad():
+        model.eval()
+        preds = model(X_test2)
+        preds = preds.cpu().detach().numpy()
+        preds=preds.reshape(preds.shape[0], )
+        preds = pd.Series(data=preds, index=y_test.index)
+        predictions[idx] = preds
+
+    preds=pd.concat([predictions[idx]]).sort_index()
     preds = preds.to_frame('mlp')
-    feats = dataset.join(preds[['mlp']], how='left')
+    new_dataset = dataset.copy()
+    feats = new_dataset.join(preds[['mlp']], how='left')
     feats.dropna(subset=['mlp'], inplace=True)
     dates = feats.index.get_level_values('date').unique().to_list()
     strat_rets = process_jobs(dates, feats, signal_col='mlp')
-    outputs[split] = get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench'))
-    print("split: ", split)
-    print(outputs[split])
+    values = get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench'))
+    print('idx: ', idx, file=outfile)
+    print(values, file=outfile, flush=True)
 
-print()
-print()
-print()
+preds=pd.concat(predictions).sort_index()
+preds = preds.to_frame('mlp')
+feats = dataset.join(preds[['mlp']], how='left')
+feats.dropna(subset=['mlp'], inplace=True)
+dates = feats.index.get_level_values('date').unique().to_list()
+strat_rets = process_jobs(dates, feats, signal_col='mlp')
+print('Final', file=outfile, flush=True)
+print(get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench')), file=outfile, flush=True)
 
-for output in outputs:
-    print(output)
+outfile.close()
