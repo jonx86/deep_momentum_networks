@@ -111,7 +111,7 @@ def get_returns_breakout(strats: pd.DataFrame):
     return ret_breakout
 
 
-def build_features(data):
+def build_features(data, add_tVarBM=False):
     """
     builds the momentum features mentioned in the paper
     """
@@ -131,11 +131,11 @@ def build_features(data):
 
     # build risk adjusted features
     data['feature_1d_ra'] = data['1d_ret']/data['rVol']
-    data['feature_1wk_ra'] = data['1wk_ret']/data['rVol'] * np.sqrt(5)
-    data['feature_1m_ra'] = data['1m_ret']/data['rVol'] * np.sqrt(20)
-    data['feature_1Q_ra'] = data['1Q_ret']/data['rVol'] * np.sqrt(60)
-    data['feature_6M_ra'] = data['6M_ret']/data['rVol'] * np.sqrt(124)
-    data['feature_12M_ra'] = data['12M_ret']/data['rVol'] * np.sqrt(252)
+    data['feature_1wk_ra'] = data['1wk_ret']/(data['rVol'] * np.sqrt(5))
+    data['feature_1m_ra'] = data['1m_ret']/(data['rVol'] * np.sqrt(20))
+    data['feature_1Q_ra'] = data['1Q_ret']/(data['rVol'] * np.sqrt(60))
+    data['feature_6M_ra'] = data['6M_ret']/(data['rVol'] * np.sqrt(124))
+    data['feature_12M_ra'] = data['12M_ret']/(data['rVol'] * np.sqrt(252))
 
     # build moving-average convergence divergence features
     data['feature_MACD_short'] = (data.groupby(by='future')['ret'].ewm(span=8).mean() - data.groupby(by='future')['ret'].ewm(span=24).mean()).droplevel(0)/data.groupby(by='future')['ret'].ewm(span=63).std().droplevel(0)
@@ -144,7 +144,6 @@ def build_features(data):
 
     # build as macd index
     data['feature_MACD_index'] = data[['feature_MACD_short', 'feature_MACD_medium', 'feature_MACD_long']].mean(axis=1)
-    data['feature_MACD_index'] = data.groupby(by='future')['feature_MACD_index']/data.groupby(by='future')['feature_MACD_index'].ewm(span=252).std()
     
     # now for new features
     data['NEW_feature_skew6m'] = data.groupby(by='future')['ret'].pct_change(1).rolling(124).skew()
@@ -152,10 +151,18 @@ def build_features(data):
     data['NEW_feature_kurt6m'] = data.groupby(by='future')['ret'].pct_change(1).rolling(124).kurt()
     data['NEW_feature_kurt12m'] = data.groupby(by='future')['ret'].pct_change(1).rolling(252).kurt()
 
-    # linear trend estimators
-    data['NEW_feature_tval3M'] = data.groupby(by='future')['ret'].rolling(60).apply(lambda x: tVarLinR(x)).droplevel(0)
-    data['NEW_feature_tval6M'] = data.groupby(by='future')['ret'].rolling(124).apply(lambda x: tVarLinR(x)).droplevel(0)
-    data['NEW_feature_tval12M'] = data.groupby(by='future')['ret'].rolling(252).apply(lambda x: tVarLinR(x)).droplevel(0)
+    if add_tVarBM:
+        # linear trend estimators
+        data['NEW_feature_tval3M'] = data.groupby(by='future')['ret'].rolling(60).apply(lambda x: tVarLinR(x)).droplevel(0)
+        data['NEW_feature_tval6M'] = data.groupby(by='future')['ret'].rolling(124).apply(lambda x: tVarLinR(x)).droplevel(0)
+        data['NEW_feature_tval12M'] = data.groupby(by='future')['ret'].rolling(252).apply(lambda x: tVarLinR(x)).droplevel(0)
+
+    # create lagged features
+    _features = [f for f in data.columns if f.startswith('feature')]
+    for lag in [1, 2, 3, 4, 5]:
+        for feat in _features:
+            data[f'lag{lag}_{feat}'] = data.groupby(by='future')[feat].shift(lag)
+
 
     # also build the target - target is +1D risk adjusted return
     data['fwd_ret1d'] = data.groupby(by='future')['1d_ret'].shift(-1)
@@ -298,3 +305,10 @@ def train_val_split(X_train: pd.DataFrame, y_train: pd.DataFrame):
 
     return X_train2, X_val, y_train2, y_val
     
+
+
+if __name__ == '__main__':
+    root = Path(__file__).parents[1].__str__()
+    tr_index = pd.read_parquet(root+'\\'+'future_total_return_index.parquet')
+    newFeats = build_features(tr_index)
+

@@ -4,6 +4,41 @@ import torch.nn.functional as F
 import numpy as np
 
 
+class SharpeLossTargetOnly(nn.Module):
+
+    def __init__(self, risk_trgt=.15):
+        super(SharpeLossTargetOnly, self).__init__()
+        self.risk_trgt = risk_trgt
+
+    def forward(self, input, target):
+        """
+        input and target are both 1-d
+        """
+
+        ret = input * self.risk_trgt * target
+        uR = torch.mean(ret)
+
+        r_squared = torch.mean(torch.pow(ret, 2))
+        uR_squared = torch.pow(uR, 2)
+
+        sharpe = uR * torch.sqrt(torch.tensor(252)) / torch.sqrt(r_squared - uR_squared)
+        return -sharpe
+    
+
+class RetLossTargetOlnly(nn.Module):
+     def __init__(self, risk_trgt=.15):
+        super(RetLossTargetOlnly, self).__init__()
+        self.risk_trgt = risk_trgt
+
+     def forward(self, input, target):
+        """
+        input and target are both 1-d
+        """
+
+        ret = input * self.risk_trgt * target
+        uR = torch.mean(ret)
+
+        return -uR
 
 class SharpeLoss(nn.Module):
     def __init__(self, risk_trgt=.15):
@@ -19,11 +54,14 @@ class SharpeLoss(nn.Module):
         ret = target[:, 0].clone()
         sigma = target[:, 1].clone()
 
-        ret = (input * self.risk_trgt * ret)/(torch.sqrt(torch.tensor(252)) * sigma)
-        ret1 = torch.mean(ret)
-        ret2 = torch.mean(ret ** 2)
+        #print(ret.shape)
+        #print(sigma.shape)
 
-        sharpe = (ret1 * 252)/(torch.sqrt((ret2-(ret1 **2 ))) * torch.sqrt(torch.tensor(252)))
+        rets = input * (self.risk_trgt/sigma * torch.sqrt(torch.tensor(252))) * ret
+        ret1 = torch.mean(rets)
+        ret2 = torch.mean(torch.pow(rets, 2))
+
+        sharpe = torch.sqrt(torch.tensor(252)) * ret1 / torch.sqrt(ret2 - torch.pow(ret1, 2))
         return -sharpe
 
     
@@ -86,8 +124,8 @@ if __name__ == "__main__":
         target = np.vstack([r, sigmas]).reshape(72, 2)
         target = torch.tensor(target)
 
-        l = SharpeLoss()
-        f = l.forward(i, target)
+        l = SharpeLossTargetOnly()
+        f = l.forward(i, torch.tensor(r/sigmas))
         print(f)
 
         extracted_val = float(f.cpu().numpy())

@@ -6,6 +6,8 @@ import pandas as pd
 
 from torch.optim import Adam
 from torch.utils.data import Dataset, DataLoader
+from torch.nn.utils import clip_grad_norm_
+from sklearn.model_selection import ParameterSampler
 import time
 
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
@@ -19,10 +21,11 @@ from utils.utils import (get_cv_splits,
 from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from losses.jm_loss import SharpeLoss
+from losses.jm_loss import SharpeLoss, RetLoss, SharpeLossTargetOnly, RetLossTargetOlnly
+
 
 class MLP(nn.Module):
-    def __init__(self, hidden_size=5, dropout=.30, input_dim=9, output_dim=1):
+    def __init__(self, hidden_size=5, dropout=.30, input_dim=60, output_dim=1):
         super(MLP, self).__init__()
 
         # init the params
@@ -33,27 +36,18 @@ class MLP(nn.Module):
 
         # init the layers
         self.fc1 = nn.Linear(self.input_dim, self.hidden_size)
-        self.relU1 = nn.ReLU()
-        self.fc2 = nn.Linear(self.hidden_size, self.hidden_size)
-        self.relU2 = nn.ReLU()
-        self.fc3 = nn.Linear(self.hidden_size, self.output_dim)
+        self.fc2 = nn.Linear(self.hidden_size, self.output_dim)
 
         # dorp out on the first two layers only?
         self.dropOut1 = nn.Dropout(p=self.dropout)
         self.dropOut2 = nn.Dropout(p=self.dropout)
-
-        # pred activation function
-        self.fc3act = nn.Tanh()
-
+    
     def forward(self, inputs):
         # roll through model
-        inputs = self.relU1(self.dropOut1(self.fc1(inputs)))
-        inputs = self.relU2(self.dropOut2(self.fc2(inputs)))
-        inputs = self.fc3(inputs)
-
-        # now for the predictions
-        inputs = self.fc3act(inputs)
-        return inputs
+        outputs = self.dropOut1(torch.tanh(self.fc1(inputs)))
+        outputs = self.dropOut2(torch.tanh(self.fc2(outputs)))
+        #print('Size of Outputs', outputs.shape)
+        return outputs
 
 
 if __name__ == '__main__':
@@ -61,8 +55,14 @@ if __name__ == '__main__':
 
     # grab the model features and targets
     features = [f for f in feats.columns if f.startswith('feature')]
-    target = ['fwd_ret1d', 'rVol']
-    full = features + target
+    lag_feats = [f for f in feats.columns if f.startswith('lag')]
+    target = ['target']
+    full = features + target + lag_feats
+
+    # add in more
+    features += lag_feats
+
+    print(features)
 
     # condense and group
     X = feats[full].dropna()
@@ -113,7 +113,7 @@ if __name__ == '__main__':
         return losses.avg
 
 
-    def train_model(epoch, model, train_loader, optimizer, loss_fnc):
+    def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3, clip_norm=False):
         iter_time = AverageMeter()
         losses = AverageMeter()
       
@@ -132,6 +132,11 @@ if __name__ == '__main__':
             # gradient descent step
             optimizer.zero_grad()
             loss.backward()
+
+            # gradient norm
+            if clip_norm:
+                clip_grad_norm_(model.parameters(), max_norm=max_norm)
+
             optimizer.step()
 
             losses.update(loss.item(), out.shape[0])
@@ -150,12 +155,23 @@ if __name__ == '__main__':
 
     
     # params
+    model_path = 'model.pt'
     EPOCHS = 100
-    learning_rate = 1e-4
-    batch_size = 256
-    hidden_layer_size = 80
-    dropout_rate = .50
+    learning_rate = 1e-3
+    batch_size = 252
+    hidden_layer_size = 20
+    dropout_rate = .30
+    max_norm = 0.01
+    early_stopping = 25
     #reg = 1e-5
+
+    grid = {'Dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
+            'Hidden': [5, 10, 20, 40, 80],
+            'batch_size': [256, 512, 1024, 2048],
+            'learning_rate': [10**-5, 10**-4, 10**-3, 10**-2, 10**-1, 10**0],
+            'max_grad_norm': [10**-4, 10**-3, 10**-2, 10**-1, 10**0, 10**1]}
+    
+    params = ParameterSampler(n_iter=50, param_distributions=grid)
 
     class AverageMeter(object):
         def __init__(self):
@@ -190,29 +206,47 @@ if __name__ == '__main__':
          X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
 
          scaler = RobustScaler()
-         X_train = scaler.fit_transform(X_train)
+
+         # we only scale the 90% train X , so we don't learn the mean and sigma of the validation set
+         X_train2 = scaler.fit_transform(X_train2)
 
          # now scaler X_train2 and Xval
-         X_train2 = scaler.transform(X_train2)
          X_val = scaler.transform(X_val)
 
-         # our data-loaders
-         dataloader = load_data_torch(X_train2, y_train2, batch_size=batch_size)
-         valdataloader = load_data_torch(X_val, y_val, batch_size=batch_size)
-
          # model
-         model = MLP(hidden_size=hidden_layer_size, dropout=dropout_rate)
+         model = MLP(hidden_size=hidden_layer_size, dropout=dropout_rate, input_dim=X_val.shape[1])
          model.to(torch.device('cuda'))
 
          optimizer = Adam(model.parameters(), lr=learning_rate)
-         loss_func = SharpeLoss(risk_trgt=.15)
+         loss_func = SharpeLossTargetOnly(risk_trgt=.15)
 
+          # our data-loaders
+         dataloader = load_data_torch(X_train2, y_train2, batch_size=batch_size)
+         valdataloader = load_data_torch(X_val, y_val, batch_size=batch_size)
+
+         early_stop_count = 0
+         best_val_loss = float('inf')
          for epoch in range(EPOCHS):
-             train_loss = train_model(epoch, model, dataloader, optimizer, loss_func)
+             train_loss = train_model(epoch, model, dataloader, optimizer,
+                                      loss_func, max_norm=max_norm,
+                                      clip_norm=True)
+             
              val_loss = validate_model(epoch, model, valdataloader, loss_func)
 
              learning_curves.loc[epoch, 'train_loss'] = train_loss
              learning_curves.loc[epoch, 'val_loss'] = val_loss
+
+             if val_loss < best_val_loss:
+                 best_val_loss = val_loss
+                 torch.save(model.state_dict(), model_path)
+                 early_stop_count += 0
+             else:
+                 early_stop_count +=1
+
+             if early_stop_count == early_stopping:
+                 print(f'Early Stopping Applied on Epoch: {epoch}')
+                 break
+             
 
          learning_curves.plot()
          plt.title(f'CV Split: {idx}')
@@ -234,6 +268,7 @@ if __name__ == '__main__':
             preds = pd.Series(data=preds, index=y_test.index)
             predictions.append(preds)
 
+         
     preds=pd.concat(predictions).sort_index()
     preds = preds.to_frame('mlp')
     feats = feats.join(preds[['mlp']], how='left')
