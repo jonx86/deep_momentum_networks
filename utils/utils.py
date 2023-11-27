@@ -144,7 +144,7 @@ def build_features(data):
 
     # build as macd index
     data['feature_MACD_index'] = data[['feature_MACD_short', 'feature_MACD_medium', 'feature_MACD_long']].mean(axis=1)
-    data['feature_MACD_index'] = data.groupby(by='future')['feature_MACD_index']/data.groupby(by='future')['feature_MACD_index'].ewm(span=252).std()
+    # data['feature_MACD_index'] = data.groupby(by='future')['feature_MACD_index']/data.groupby(by='future')['feature_MACD_index'].ewm(span=252).std()
     
     # now for new features
     data['NEW_feature_skew6m'] = data.groupby(by='future')['ret'].pct_change(1).rolling(124).skew()
