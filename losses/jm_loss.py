@@ -76,7 +76,7 @@ if __name__ == "__main__":
         target = np.vstack([r, sigmas]).reshape(72, 2)
         target = torch.tensor(target)
 
-        l = SharpeLossTargetOnly()
+        l = SharpeLoss()
         f = l.forward(i, torch.tensor(r/sigmas))
         print(f)
 

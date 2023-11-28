@@ -307,7 +307,11 @@ def train_val_split(X_train: pd.DataFrame, y_train: pd.DataFrame):
     return X_train2, X_val, y_train2, y_val
 
 
-def split_sequence_for_cnn(X, y, lookback=4):
+def split_sequence_for_cnn(X, y, lookback=4, lstm=False):
+    """
+    splits the sequence for feeding into the model
+    returns X=(Batch Size, Features, Time Steps for CNN)
+    """
     totals = X.shape[0] // lookback
     xs = []
     ys = []
@@ -321,12 +325,12 @@ def split_sequence_for_cnn(X, y, lookback=4):
         else:
             _x = X[i*lookback:i*lookback+lookback]
             _y = y[(i+1)*lookback -1]
-            xs.append(_x.T)
+            xs.append(_x.T if not lstm else _x)
             ys.append(_y)
     return np.array(xs), np.array(ys)
 
 
-def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10, return_pandas=False):
+def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10, return_pandas=False, lstm=False):
     """
     If return pandas returns list of DataFrame split by a rolling look-back window.
     If not pandas returns a numpy array of size (N-lookback, Features, looback) or (N, CHin, L) --> Conv1D
@@ -347,7 +351,7 @@ def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10, 
             if i>=lookback:
                 _x = X[i-lookback:i]
                 _y = y[i]
-                xs.append(_x.T)
+                xs.append(_x.T if not lstm else _x)
                 ys.append(_y)
         return np.array(xs), np.array(ys)
     else:
@@ -364,7 +368,8 @@ def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10, 
     
 
 def get_seq_test_preds(model, X_test_single_future:list, features:list):
-    predictions = pd.DataFrame(columns=['predictions', 'future'])
+    predictions = []
+    idx = []
     for x in X_test_single_future:
         # data
         data_pred = x[features].copy()
@@ -383,15 +388,16 @@ def get_seq_test_preds(model, X_test_single_future:list, features:list):
         data_pred = data_pred.unsqueeze(0) # add dim 0=1 for a single training example
         preds = model(data_pred)
         preds = preds.cpu().detach().numpy()
-        #print('Shape of Preds', preds)
-        #print(x.tail(1).index.values[0])
-        predictions.loc[x.index[-1], 'predictions'] = preds
+
+        idx.append((x.tail(1).index.values[0], x.future[-1]))
+        predictions.append(preds.squeeze().__float__())
     
-    # TODO - this is wrong!!
-    x['prediction'] = predictions
-    x.reset_index(inplace=True)
-    x.set_index(['date', 'future'], inplace=True)
-    return x[['prediction']]
+    # index
+    index = pd.MultiIndex.from_tuples(tuples=idx, names=['date', 'future'])
+    out = pd.Series(data=predictions, index=index)
+
+    return out
+
 
 def aggregate_seq_preds(model, X_test:list, features:list):
     # return predictions
@@ -400,7 +406,10 @@ def aggregate_seq_preds(model, X_test:list, features:list):
     return pd.concat(results, axis=0).sort_index()
 
     
-def split_Xy_for_seq(X_train:pd.DataFrame, y_train:pd.DataFrame, step_size, split_func=split_rolling_sequences_for_cnn, return_pandas=True)->tuple:
+def split_Xy_for_seq(X_train:pd.DataFrame, y_train:pd.DataFrame,
+                     step_size, split_func=split_rolling_sequences_for_cnn,
+                     return_pandas=True)->tuple:
+    
     # break out x and ys
     xs, ys = [], []
 
@@ -431,32 +440,4 @@ def retain_pandas_after_scale(X, scaler):
     return pd.DataFrame(X, index=idx, columns=col_names)
 
 
-if __name__ == '__main__':
-    # root = Path(__file__).parents[1].__str__()
-    # tr_index = pd.read_parquet(root+'\\'+'future_total_return_index.parquet')
-    # newFeats = build_features(tr_index)
-
-    X_test = np.random.randn(1000, 60)
-    y_test = np.random.randn(1000, )
-
-    xs, ys = split_rolling_sequences_for_cnn(X_test, y_test, lookback=100, return_pandas=False)
-
-    print(xs.shape)
-    print(ys.shape)
-
-
-    xsPandas, ysPandas = split_rolling_sequences_for_cnn(pd.DataFrame(X_test),
-                                                         pd.Series(y_test),
-                                                         lookback=100,
-                                                         return_pandas=True)
-    
-
-    data = load_features()
-
-    X = data[[f for f in data.columns if f.startswith('feature')]]
-    y = data['target']
-
-
-    #xs2, ys2 = split_Xy_for_seq(X, y, 20, return_pandas=True)
-    xs2_numpy, ys2_numpy = split_Xy_for_seq(X, y, 20, return_pandas=False)
 

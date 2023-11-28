@@ -195,24 +195,16 @@ if __name__ == '__main__':
     EPOCHS = 100
     learning_rate = 1e-3
     batch_size = 512
-    hidden_layer_size = 20
+    hidden_layer_size = 10
     dropout_rate = .50
     max_norm = 0.01
     early_stopping = 10
     #reg = 1e-5
 
-    filters = 4
-    kernel_size=4
-    pool_size=4
+    filters = 3
+    kernel_size= 5
+    pool_size=2
     sequence_length = 20
-
-    # grid = {'Dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
-    #         'Hidden': [5, 10, 20, 40, 80],
-    #         'batch_size': [256, 512, 1024, 2048],
-    #         'learning_rate': [10**-5, 10**-4, 10**-3, 10**-2, 10**-1, 10**0],
-    #         'max_grad_norm': [10**-4, 10**-3, 10**-2, 10**-1, 10**0, 10**1]}
-    
-    # params = ParameterSampler(n_iter=50, param_distributions=grid)
 
     class AverageMeter(object):
         def __init__(self):
@@ -264,11 +256,10 @@ if __name__ == '__main__':
                            pool_size=pool_size)
          
          model.to(torch.device('cuda'))
-
          optimizer = Adam(model.parameters(), lr=learning_rate)
          loss_func = SharpeLoss(risk_trgt=.15)
 
-         # before sending in our dataloader we need to create the sequences for both train and val
+         # before sending into dataloader we need to create the sequences for both train and val
          X_train2, y_train2 = split_Xy_for_seq(X_train=X_train2,
                                                y_train=y_train2,
                                                step_size=sequence_length,
@@ -280,6 +271,7 @@ if __name__ == '__main__':
                                          step_size=sequence_length,
                                          return_pandas=False,
                                          split_func=split_rolling_sequences_for_cnn)
+         
 
           # our data-loaders
          dataloader = load_data_torch(X_train2, y_train2, batch_size=batch_size)
@@ -334,11 +326,12 @@ if __name__ == '__main__':
             # preds = pd.Series(data=preds, index=y_test.index)
             predictions.append(preds)
          break
+         
 
     
     # 1d conv nets
     preds=pd.concat(predictions).sort_index()
-    preds.rename(columns={'prediction': 'Conv1D'}, inplace=True)
+    preds = preds.to_frame('Conv1D')
     feats = feats.join(preds[['Conv1D']], how='left')
     feats.dropna(subset=['Conv1D'], inplace=True)
     dates = feats.index.get_level_values('date').unique().to_list()
