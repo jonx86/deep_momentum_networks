@@ -15,12 +15,17 @@ from utils.utils import (get_cv_splits,
                          load_features,
                          train_val_split,
                          process_jobs,
-                         get_returns_breakout)
+                         get_returns_breakout,
+                         split_sequence_for_cnn,
+                         split_Xy_for_seq,
+                         retain_pandas_after_scale,
+                         split_rolling_sequences_for_cnn,
+                         aggregate_seq_preds)
 
 from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from losses.jm_loss import SharpeLossTargetOnly, RetLossTargetOlnly
+from losses.jm_loss import SharpeLoss, RetLoss
 
 
 
@@ -39,11 +44,11 @@ class SimpleCNN(nn.Module):
 
 
         # 1d convolutional layer
-        self.conv1d = self.CausalConv1d(in_channels=self.in_channels,
-                                        out_channels=self.filter_size,
-                                        kernel_size=self.kernel_size)
+        self.conv1d = nn.Conv1d(in_channels=self.in_channels,
+                                out_channels=self.filter_size,
+                                kernel_size=self.kernel_size)
         
-        self.maxPool = nn.MaxPool1d(kernel_size=self.pool_size)
+        self.maxPool = nn.AvgPool1d(kernel_size=self.pool_size)
         self.flatter = nn.Flatten()
 
         # now two fully connected layers
@@ -54,18 +59,14 @@ class SimpleCNN(nn.Module):
         self.dropOut1 = nn.Dropout(p=self.dropout_rate)
         self.dropOut2 = nn.Dropout(p=self.dropout_rate)
 
-    def CausalConv1d(self, in_channels, out_channels, kernel_size, dilation=1, **kwargs):
-        pad = (kernel_size - 1) * dilation
-        return nn.Conv1d(in_channels, out_channels, kernel_size, padding=pad, dilation=dilation, **kwargs)
-
     def forward(self, inputs):
         outputs = self.conv1d(inputs)
         outputs = self.maxPool(outputs)
 
         #new shape should be N, Filter * Seq Length - Kernel + 1
         outputs = self.flatter(outputs)
-        outputs = torch.tanh(self.fc1(outputs))
-        outputs = torch.tanh(self.fc2(outputs))
+        outputs = self.dropOut1(torch.tanh(self.fc1(outputs)))
+        outputs = self.dropOut2(torch.tanh(self.fc2(outputs)))
 
         return outputs
 
@@ -81,8 +82,6 @@ if __name__ == '__main__':
     test2 = mdl.forward(torch.rand(10, 60, 100))
 
     print(test2.shape)
-
-
     feats = load_features()
 
     # grab the model features and targets
@@ -103,7 +102,7 @@ if __name__ == '__main__':
     # returns the loader
     def load_data_torch(X, y, batch_size=64):
         X = torch.tensor(X, dtype=torch.float32)
-        y = torch.tensor(y.values, dtype=torch.float32)
+        y = torch.tensor(y, dtype=torch.float32)
 
         # send to cuda
         X.to(torch.device('cuda'))
@@ -113,7 +112,7 @@ if __name__ == '__main__':
         return loader
     
 
-    def validate_model(epoch, model, val_loader, loss_fnc, batch_size, sequence_length):
+    def validate_model(epoch, model, val_loader, loss_fnc):
         iter_time = AverageMeter()
         losses = AverageMeter()
 
@@ -123,9 +122,7 @@ if __name__ == '__main__':
             if torch.cuda.is_available:
                 data = data.cuda()
                 target = target.cuda()
-                re_shape_tup = (int(batch_size/sequence_length), 60, sequence_length)
-                data = data.view(re_shape_tup)
-            
+              
             with torch.no_grad():
                 out = model(data)
                 out = out.cuda()
@@ -147,7 +144,7 @@ if __name__ == '__main__':
         return losses.avg
 
 
-    def train_model(epoch, model, train_loader, optimizer, loss_fnc, batch_size, sequence_length, max_norm=10**-3, clip_norm=False):
+    def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3, clip_norm=False):
         iter_time = AverageMeter()
         losses = AverageMeter()
       
@@ -158,14 +155,9 @@ if __name__ == '__main__':
                 data = data.cuda()
                 target = target.cuda()
 
-                # reshape the tensor to feed into the CNN
-                # batch size must be divisible by seq length
-                re_shape_tup = (int(batch_size/sequence_length), 60, sequence_length)
-                data = data.view(re_shape_tup)
-
                 # target needs to be reshaped as well
-                print('shape of data', data.shape)
-                print('shape of target', target.shape)
+                #print('shape of data', data.shape)
+                #print('shape of target', target.shape)
 
 
             # forward step
@@ -202,25 +194,25 @@ if __name__ == '__main__':
     model_path = 'model.pt'
     EPOCHS = 100
     learning_rate = 1e-3
-    batch_size = 500
-    sequence_length = 50
+    batch_size = 512
     hidden_layer_size = 20
-    dropout_rate = .30
+    dropout_rate = .50
     max_norm = 0.01
-    early_stopping = 25
+    early_stopping = 10
     #reg = 1e-5
 
-    filters = 32
-    kernel_size=1
-    pool_size=2
+    filters = 4
+    kernel_size=4
+    pool_size=4
+    sequence_length = 20
 
-    grid = {'Dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
-            'Hidden': [5, 10, 20, 40, 80],
-            'batch_size': [256, 512, 1024, 2048],
-            'learning_rate': [10**-5, 10**-4, 10**-3, 10**-2, 10**-1, 10**0],
-            'max_grad_norm': [10**-4, 10**-3, 10**-2, 10**-1, 10**0, 10**1]}
+    # grid = {'Dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
+    #         'Hidden': [5, 10, 20, 40, 80],
+    #         'batch_size': [256, 512, 1024, 2048],
+    #         'learning_rate': [10**-5, 10**-4, 10**-3, 10**-2, 10**-1, 10**0],
+    #         'max_grad_norm': [10**-4, 10**-3, 10**-2, 10**-1, 10**0, 10**1]}
     
-    params = ParameterSampler(n_iter=50, param_distributions=grid)
+    # params = ParameterSampler(n_iter=50, param_distributions=grid)
 
     class AverageMeter(object):
         def __init__(self):
@@ -238,7 +230,6 @@ if __name__ == '__main__':
             self.count += n
             self.avg = self.sum / self.count
 
-
     predictions = []
 
     # now start the loop
@@ -254,21 +245,41 @@ if __name__ == '__main__':
          # validation split
          X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
 
+         # initalize a scaler
          scaler = RobustScaler()
 
          # we only scale the 90% train X , so we don't learn the mean and sigma of the validation set
-         X_train2 = scaler.fit_transform(X_train2)
+         scaler.fit(X_train2)
+         X_train2 = retain_pandas_after_scale(X_train2, scaler)
 
          # now scaler X_train2 and Xval
-         X_val = scaler.transform(X_val)
+         X_val = retain_pandas_after_scale(X_val, scaler)
 
-         # model
-         model = SimpleCNN(in_channels=60, hidden_shape=hidden_layer_size, output_shape=1, filter_size=filters,
-                           kernel_size=kernel_size, droput_rate=dropout_rate, pool_size=pool_size)
+         # Model
+         model = SimpleCNN(in_channels=X_train.shape[1],
+                           hidden_shape=hidden_layer_size,
+                           output_shape=1, filter_size=filters,
+                           kernel_size=kernel_size,
+                           droput_rate=dropout_rate,
+                           pool_size=pool_size)
+         
          model.to(torch.device('cuda'))
 
          optimizer = Adam(model.parameters(), lr=learning_rate)
-         loss_func = SharpeLossTargetOnly(risk_trgt=.15)
+         loss_func = SharpeLoss(risk_trgt=.15)
+
+         # before sending in our dataloader we need to create the sequences for both train and val
+         X_train2, y_train2 = split_Xy_for_seq(X_train=X_train2,
+                                               y_train=y_train2,
+                                               step_size=sequence_length,
+                                               return_pandas=False,
+                                               split_func=split_rolling_sequences_for_cnn)
+         
+         X_val, y_val = split_Xy_for_seq(X_train=X_val,
+                                         y_train=y_val,
+                                         step_size=sequence_length,
+                                         return_pandas=False,
+                                         split_func=split_rolling_sequences_for_cnn)
 
           # our data-loaders
          dataloader = load_data_torch(X_train2, y_train2, batch_size=batch_size)
@@ -278,10 +289,7 @@ if __name__ == '__main__':
          best_val_loss = float('inf')
          for epoch in range(EPOCHS):
              train_loss = train_model(epoch, model, dataloader, optimizer,
-                                      loss_func,batch_size=batch_size,
-                                      sequence_length=sequence_length,
-                                      max_norm=max_norm,
-                                      clip_norm=True)
+                                      loss_func, max_norm=max_norm, clip_norm=True)
              
              val_loss = validate_model(epoch, model, valdataloader, loss_func)
 
@@ -307,27 +315,35 @@ if __name__ == '__main__':
 
          # scale 
          X_test2 = X_test.copy()
-         X_test2 = scaler.transform(X_test2)
-        
-         X_test2 = torch.tensor(X_test2, dtype=torch.float32)
-         X_test2 = X_test2.cuda()
+         X_test2 = retain_pandas_after_scale(X_test2, scaler)
 
+         # this is where we need to start our new logic to generate test data in a shape
+         # able to fit into the model
+         xs, _ =split_Xy_for_seq(X_test2, y_test,
+                                 step_size=sequence_length,
+                                 split_func=split_rolling_sequences_for_cnn,
+                                 return_pandas=True)
+         
+        
          with torch.no_grad():
             model.eval()
-            preds = model(X_test2)
-            preds = preds.cpu().detach().numpy()
-            preds=preds.reshape(preds.shape[0], )
-            preds = pd.Series(data=preds, index=y_test.index)
+            preds = aggregate_seq_preds(model, xs, features=features)
+            # preds = model(X_test2)
+            # preds = preds.cpu().detach().numpy()
+            # preds=preds.reshape(preds.shape[0], )
+            # preds = pd.Series(data=preds, index=y_test.index)
             predictions.append(preds)
+         break
 
-         
+    
+    # 1d conv nets
     preds=pd.concat(predictions).sort_index()
-    preds = preds.to_frame('mlp')
-    feats = feats.join(preds[['mlp']], how='left')
-    feats.dropna(subset=['mlp'], inplace=True)
+    preds.rename(columns={'prediction': 'Conv1D'}, inplace=True)
+    feats = feats.join(preds[['Conv1D']], how='left')
+    feats.dropna(subset=['Conv1D'], inplace=True)
     dates = feats.index.get_level_values('date').unique().to_list()
-    strat_rets = process_jobs(dates, feats, signal_col='mlp')
-    print(get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench')))
+    strat_rets = process_jobs(dates, feats, signal_col='Conv1D')
+    print(get_returns_breakout(strat_rets.fillna(0.0).to_frame('Conv1D')))
 
 
 

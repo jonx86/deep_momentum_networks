@@ -21,8 +21,7 @@ from utils.utils import (get_cv_splits,
 from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from losses.jm_loss import SharpeLoss, RetLoss, SharpeLossTargetOnly, RetLossTargetOlnly
-
+from losses.jm_loss import SharpeLoss, RetLoss
 
 class MLP(nn.Module):
     def __init__(self, hidden_size=5, dropout=.30, input_dim=60, output_dim=1):
@@ -218,7 +217,7 @@ if __name__ == '__main__':
          model.to(torch.device('cuda'))
 
          optimizer = Adam(model.parameters(), lr=learning_rate)
-         loss_func = SharpeLossTargetOnly(risk_trgt=.15)
+         loss_func = SharpeLoss(risk_trgt=.15)
 
           # our data-loaders
          dataloader = load_data_torch(X_train2, y_train2, batch_size=batch_size)

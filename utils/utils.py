@@ -8,7 +8,8 @@ import empyrical as ep
 from joblib import Parallel, delayed    
 import statsmodels.api as sml
 from pathlib import Path
-
+from tqdm import tqdm
+import torch
 
 def getPortVol(weights, cov, ann_factor=252):
         if ann_factor is None:
@@ -304,11 +305,158 @@ def train_val_split(X_train: pd.DataFrame, y_train: pd.DataFrame):
     y_val = y_train.loc[y_train.index.get_level_values('date')>last_train_date]
 
     return X_train2, X_val, y_train2, y_val
+
+
+def split_sequence_for_cnn(X, y, lookback=4):
+    totals = X.shape[0] // lookback
+    xs = []
+    ys = []
+
+    for i in range(totals):
+        if i==0:
+            _x = X[i:i+lookback]
+            _y = y[i+lookback-1]
+            xs.append(_x.T)
+            ys.append(_y)
+        else:
+            _x = X[i*lookback:i*lookback+lookback]
+            _y = y[(i+1)*lookback -1]
+            xs.append(_x.T)
+            ys.append(_y)
+    return np.array(xs), np.array(ys)
+
+
+def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10, return_pandas=False):
+    """
+    If return pandas returns list of DataFrame split by a rolling look-back window.
+    If not pandas returns a numpy array of size (N-lookback, Features, looback) or (N, CHin, L) --> Conv1D
+    """
+   
+    # we need to loop through the entire sequence starting at t0+looback
+    N = X.shape[0]
+
+    # y will always be just y[:y.shape[0]-lookback]
+    if not return_pandas:
+        xs, ys = [], []
+        if isinstance(X, pd.DataFrame):
+            X = X.values
+        if isinstance(y, pd.Series) or isinstance(y, pd.DataFrame):
+            y = y.values
+
+        for i in range(N):
+            if i>=lookback:
+                _x = X[i-lookback:i]
+                _y = y[i]
+                xs.append(_x.T)
+                ys.append(_y)
+        return np.array(xs), np.array(ys)
+    else:
+        #print('Using Pandas')
+        xs, ys = [], []
+        for i in range(N):
+            if i>=lookback:
+                _x = X.iloc[i-lookback:i]
+                #print(type(_x))
+                _y = y.iloc[i]
+                xs.append(_x) # don't transpose here, only used for the Xtest predict step
+                ys.append(_y)
+        return xs, ys
     
+
+def get_seq_test_preds(model, X_test_single_future:list, features:list):
+    predictions = pd.DataFrame(columns=['predictions', 'future'])
+    for x in X_test_single_future:
+        # data
+        data_pred = x[features].copy()
+        data_pred = data_pred.values.T # take to numpy
+        data_pred = torch.tensor(data_pred, dtype=torch.float32)
+
+        # we need to retain the pandas multi-index
+        # x.reset_index(inplace=True)
+        # x.set_index(['date', 'future'], inplace=True)
+
+        if torch.cuda.is_available():
+            data_pred = data_pred.cuda()
+
+        # this one training example of size (N=1, C=60, L=20) or whatever the look-back is
+        # returns size of 1
+        data_pred = data_pred.unsqueeze(0) # add dim 0=1 for a single training example
+        preds = model(data_pred)
+        preds = preds.cpu().detach().numpy()
+        #print('Shape of Preds', preds)
+        #print(x.tail(1).index.values[0])
+        predictions.loc[x.index[-1], 'predictions'] = preds
+    
+    # TODO - this is wrong!!
+    x['prediction'] = predictions
+    x.reset_index(inplace=True)
+    x.set_index(['date', 'future'], inplace=True)
+    return x[['prediction']]
+
+def aggregate_seq_preds(model, X_test:list, features:list):
+    # return predictions
+     # NOTE with roughly 8k daily observations this takes 20 minutes on cores=24 for a single strategy back-test
+    results = Parallel(n_jobs=-1, verbose=True)(delayed(get_seq_test_preds)(model, x, features) for x in X_test)
+    return pd.concat(results, axis=0).sort_index()
+
+    
+def split_Xy_for_seq(X_train:pd.DataFrame, y_train:pd.DataFrame, step_size, split_func=split_rolling_sequences_for_cnn, return_pandas=True)->tuple:
+    # break out x and ys
+    xs, ys = [], []
+
+    for future in tqdm(X_train.index.get_level_values("future").unique()):
+        _x, _y = X_train.xs(future, level='future'), y_train.xs(future, level="future")
+        seq_x, seq_y = split_func(_x, _y, lookback=step_size, return_pandas=return_pandas)
+        
+        if not return_pandas:
+            xs.append(seq_x) # transpose to be # channels , # time
+            ys.append(seq_y)
+        else:
+            assert isinstance(seq_x, list)
+            seq_x = [i.assign(future=future) for i in seq_x]
+            xs.append(seq_x)
+            ys.append(seq_y)
+        
+    if not return_pandas:
+        xs = np.concatenate(xs)
+        ys = np.concatenate(ys)
+    
+    return xs, ys
+
+def retain_pandas_after_scale(X, scaler):
+    # scaler must already be fit!
+    idx = X.index
+    col_names = X.columns.to_list()
+    X = scaler.transform(X)
+    return pd.DataFrame(X, index=idx, columns=col_names)
 
 
 if __name__ == '__main__':
-    root = Path(__file__).parents[1].__str__()
-    tr_index = pd.read_parquet(root+'\\'+'future_total_return_index.parquet')
-    newFeats = build_features(tr_index)
+    # root = Path(__file__).parents[1].__str__()
+    # tr_index = pd.read_parquet(root+'\\'+'future_total_return_index.parquet')
+    # newFeats = build_features(tr_index)
+
+    X_test = np.random.randn(1000, 60)
+    y_test = np.random.randn(1000, )
+
+    xs, ys = split_rolling_sequences_for_cnn(X_test, y_test, lookback=100, return_pandas=False)
+
+    print(xs.shape)
+    print(ys.shape)
+
+
+    xsPandas, ysPandas = split_rolling_sequences_for_cnn(pd.DataFrame(X_test),
+                                                         pd.Series(y_test),
+                                                         lookback=100,
+                                                         return_pandas=True)
+    
+
+    data = load_features()
+
+    X = data[[f for f in data.columns if f.startswith('feature')]]
+    y = data['target']
+
+
+    #xs2, ys2 = split_Xy_for_seq(X, y, 20, return_pandas=True)
+    xs2_numpy, ys2_numpy = split_Xy_for_seq(X, y, 20, return_pandas=False)
 
