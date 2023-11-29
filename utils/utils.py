@@ -5,11 +5,12 @@ import seaborn as sns
 import joblib
 from pandas.tseries.offsets import BDay
 import empyrical as ep
-from joblib import Parallel, delayed    
+from joblib import Parallel, delayed
 import statsmodels.api as sml
 from pathlib import Path
 from tqdm import tqdm
-import torch
+import torchimport os
+
 
 def getPortVol(weights, cov, ann_factor=252):
         if ann_factor is None:
@@ -36,7 +37,7 @@ def get_ret_single_date(data:pd.DataFrame, date:str, signal_col:str, fwd_ret_col
     Returns:
         pd.Series: A series containing the calculated return for the given date.
     """
-    
+
     # output
     out = pd.Series(dtype=np.float64)
 
@@ -44,7 +45,7 @@ def get_ret_single_date(data:pd.DataFrame, date:str, signal_col:str, fwd_ret_col
         # copy in the data
         data = data.copy(deep=True)
         data = data.loc[data.index.get_level_values('date')>='1990-01-03']
-        data.dropna(subset=[signal_col], inplace=True) 
+        data.dropna(subset=[signal_col], inplace=True)
 
         one_date = data.loc[data.index.get_level_values('date')==date]
         past_returns = data[['1d_ret']].unstack()
@@ -57,14 +58,14 @@ def get_ret_single_date(data:pd.DataFrame, date:str, signal_col:str, fwd_ret_col
         wts = (one_date[signal_col] * (risk_trgt/(one_date['rVol'] * np.sqrt(252))))/one_date['rVol'].count()
         futures = wts.droplevel(0).index.to_list()
         past_returns = past_returns[futures].fillna(0.0)
-        
+
         # from the vols compute a covariance matrix
         cov = past_returns.ewm(span=60).cov()
         cov = cov.loc[cov.index.get_level_values('date') == date].values
-        
+
         # compute the total portfolio standard deviation using the covariance matrix and weights
         total_pf_vol = getPortVol(wts, cov, ann_factor=252)
-        
+
         # scale the total pf volatility to a risk target
         pf_risk_scaler = risk_trgt/total_pf_vol
 
@@ -108,7 +109,7 @@ def get_returns_breakout(strats: pd.DataFrame):
         ret_breakout.loc[strat, 'Sortino'] = ep.sortino_ratio(_strat)
         ret_breakout.loc[strat, 'Calmar'] = ep.calmar_ratio(_strat)
         ret_breakout.loc[strat, 'ppct_postive_rets'] = _strat[_strat>0].shape[0]/_strat.shape[0]
-       
+
     return ret_breakout
 
 
@@ -118,7 +119,7 @@ def build_features(data, add_tVarBM=False):
     """
     # make copy
     data = data.copy()
-    
+
     # ewm realized volatility a rough forecast of t+1
     data['rVol'] = data.groupby(by='future')[['ret']].pct_change().ewm(span=60).std()
 
@@ -184,7 +185,7 @@ def tVarLinR(close: pd.Series) -> float:
 # NOTE - Benchmarks , creates the signal column
 def linear_trend_bm(feats)-> pd.DataFrame:
     """
-    creates one of our benchmark stratgies, trend following with linear regression 
+    creates one of our benchmark stratgies, trend following with linear regression
     """
     # create a blended index
     feats['lin_trend_benchmark'] = feats[['NEW_feature_tval12M']].mean(axis=1)
@@ -215,7 +216,7 @@ def macd_combined_bm(feats, exp=True):
         feats['feature_MACD_index'] = (feats['feature_MACD_index'] * (np.exp(-feats['feature_MACD_index']**2/4)))/.89
     else:
         feats['feature_MACD_index'] = np.sign(feats['feature_MACD_index'])
-   
+
     return feats
 
 
@@ -239,18 +240,18 @@ def load_features()-> pd.DataFrame:
     root = Path(__file__).parents[1].__str__()
 
     try:
-        feats = pd.read_parquet(root+'\\'+'features.parquet')
+        feats = pd.read_parquet(Path(root, 'features.parquet'))
         return feats
     except Exception as e:
-        tr_index = pd.read_parquet(root+'\\'+'future_total_return_index.parquet')
+        tr_index = pd.read_parquet(Path(root, 'future_total_return_index.parquet'))
         feats = build_features(tr_index)
 
-        # save out now 
-        feats.to_parquet(root+'\\'+'features.parquet')
+        # save out now
+        feats.to_parquet(Path(root, 'features.parquet'))
         return feats
 
 
-# NOTE - functions we will use for cross-validation 
+# NOTE - functions we will use for cross-validation
 def cv_date_splitter(dates: list, split_length: int=252 * 5) -> list:
     """
     returns time points for expanding window cross-valiation (start, end, test)
@@ -288,8 +289,8 @@ def get_cv_splits(feats: pd.DataFrame, split_length: int=252*5):
     for split in splits:
         train = feats.loc[(feats.index.get_level_values('date')>=split[0]) & (feats.index.get_level_values('date')<=split[1])]
         test = feats.loc[(feats.index.get_level_values('date')>split[1]) & (feats.index.get_level_values('date')<=split[2])]
-        yield train, test 
-       
+        yield train, test
+
 
 def train_val_split(X_train: pd.DataFrame, y_train: pd.DataFrame):
     # train split
