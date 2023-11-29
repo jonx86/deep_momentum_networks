@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 import os
 
 from utils.utils import get_cv_splits, load_features, train_val_split, process_jobs, get_returns_breakout
-# from losses import jm_loss as L
-from losses import ryan_losses as L
+from losses import jm_loss as L
+# from losses import ryan_losses as L
 # from losses import masa_loss as L
 
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
@@ -38,7 +38,7 @@ epochs = 100
 patience = 25
 learning_rate = 0.001 #1e-5
 maximum_gradient_norm = 0.01
-criterion_name = 'SharpeLoss' # MSELoss, SharpeLossTargetOnly, WeightedSharpeLoss
+criterion_name = 'SharpeLoss' # SharpeLoss, RetLoss, RegressionLoss, BinaryClassificationLoss
 model_name = 'SimpleMLP' # SimpleMLP
 model_path = 'model.pt'
 

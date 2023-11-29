@@ -104,8 +104,8 @@ def load_data_torch(X, y, batch_size=64):
     y = torch.tensor(y.values, dtype=torch.float32)
 
     # send to cuda
-    X.to(torch.device('cuda'))
-    y.to(torch.device('cuda'))
+    X.to(torch.device(gpu))
+    y.to(torch.device(gpu))
 
     loader = DataLoader(list(zip(X, y)), shuffle=False, batch_size=batch_size)
     return loader
@@ -302,7 +302,7 @@ def run_train(params, gpu):
 # Source: https://stackoverflow.com/questions/61763206/is-there-a-way-to-pass-arguments-to-multiple-jobs-in-optuna
 from contextlib import contextmanager
 import multiprocessing
-N_GPUS = 8
+N_GPUS = 1
 class GpuQueue:
 
     def __init__(self):
@@ -345,7 +345,7 @@ def run_hyper_parameter_tuning():
     # sampler = optuna.samplers.TPESampler(seed=42)
     sampler = optuna.samplers.RandomSampler(seed=42)
     study = optuna.create_study(sampler=sampler)
-    study.optimize(Objective(GpuQueue()), n_trials=50, n_jobs=64, show_progress_bar=True)
+    study.optimize(Objective(GpuQueue()), n_trials=10, n_jobs=10, show_progress_bar=True)
     # study.optimize(objective, n_trials=50, n_jobs=-1, show_progress_bar=True)
     # study.optimize(objective, n_trials=2, show_progress_bar=True)
 
@@ -361,7 +361,7 @@ def run_hyper_parameter_tuning():
     return best_params
 
 # set up a base model
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 predictions = []
 scores = []
