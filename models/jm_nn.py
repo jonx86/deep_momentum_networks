@@ -21,7 +21,10 @@ from utils.utils import (get_cv_splits,
 from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from losses.jm_loss import SharpeLoss, RetLoss
+from losses.jm_loss import SharpeLoss, RetLoss, RegressionLoss, BinaryClassificationLoss
+
+np.random.seed(49)
+torch.random.seed()
 
 class MLP(nn.Module):
     def __init__(self, hidden_size=5, dropout=.30, input_dim=60, output_dim=1):
@@ -50,6 +53,7 @@ class MLP(nn.Module):
 
 
 if __name__ == '__main__':
+    # features
     feats = load_features()
 
     # grab the model features and targets
@@ -60,6 +64,14 @@ if __name__ == '__main__':
 
     # add in more
     features += lag_feats
+
+    NEW_feats = False
+    if NEW_feats:
+        full += ['NEW_feature_skew6m', 'NEW_feature_skew12m',
+                'NEW_feature_kurt6m', 'NEW_feature_kurt12m']
+        
+        features += ['NEW_feature_skew6m', 'NEW_feature_skew12m',
+                'NEW_feature_kurt6m', 'NEW_feature_kurt12m']
 
     print(features)
 
@@ -157,7 +169,7 @@ if __name__ == '__main__':
     model_path = 'model.pt'
     EPOCHS = 100
     learning_rate = 1e-3
-    batch_size = 252
+    batch_size = 512
     hidden_layer_size = 20
     dropout_rate = .30
     max_norm = 0.01
@@ -189,92 +201,111 @@ if __name__ == '__main__':
             self.avg = self.sum / self.count
 
 
-    predictions = []
+backtests = []
+for _loss in [('Sharpe', SharpeLoss), ('RetLoss', RetLoss)]:
+        predictions = []
+        # now start the loop
+        for idx, (train, test) in enumerate(get_cv_splits(X)):
+            learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
+            iter_time = AverageMeter()
+            train_losses = AverageMeter()
+            
+            # break out X and y train
+            X_train, y_train = train[features], train[target] 
+            X_test, y_test = test[features], test[target]
 
-    # now start the loop
-    for idx, (train, test) in enumerate(get_cv_splits(X)):
-         learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
-         iter_time = AverageMeter()
-         train_losses = AverageMeter()
-         
-         # break out X and y train
-         X_train, y_train = train[features], train[target] 
-         X_test, y_test = test[features], test[target]
+            # validation split
+            X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
 
-         # validation split
-         X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
+            scaler = RobustScaler()
 
-         scaler = RobustScaler()
+            # we only scale the 90% train X , so we don't learn the mean and sigma of the validation set
+            X_train2 = scaler.fit_transform(X_train2)
 
-         # we only scale the 90% train X , so we don't learn the mean and sigma of the validation set
-         X_train2 = scaler.fit_transform(X_train2)
+            # now scaler X_train2 and Xval
+            X_val = scaler.transform(X_val)
 
-         # now scaler X_train2 and Xval
-         X_val = scaler.transform(X_val)
+            # model
+            model = MLP(hidden_size=hidden_layer_size, dropout=dropout_rate, input_dim=X_val.shape[1])
+            model.to(torch.device('cuda'))
 
-         # model
-         model = MLP(hidden_size=hidden_layer_size, dropout=dropout_rate, input_dim=X_val.shape[1])
-         model.to(torch.device('cuda'))
+            optimizer = Adam(model.parameters(), lr=learning_rate)
 
-         optimizer = Adam(model.parameters(), lr=learning_rate)
-         loss_func = SharpeLoss(risk_trgt=.15)
+            if _loss[0] in ['Sharpe', 'RetLoss']:
+                loss_func = _loss[1](risk_trgt=.15)
+            else:
+                loss_func = _loss[1]()
+                if _loss[0] == 'Bin':
+                    y_train, y_test, y_val = np.sign(y_train), np.sign(y_test), np.sign(y_val)
 
-          # our data-loaders
-         dataloader = load_data_torch(X_train2, y_train2, batch_size=batch_size)
-         valdataloader = load_data_torch(X_val, y_val, batch_size=batch_size)
+            # our data-loaders
+            dataloader = load_data_torch(X_train2, y_train2, batch_size=batch_size)
+            valdataloader = load_data_torch(X_val, y_val, batch_size=batch_size)
 
-         early_stop_count = 0
-         best_val_loss = float('inf')
-         for epoch in range(EPOCHS):
-             train_loss = train_model(epoch, model, dataloader, optimizer,
-                                      loss_func, max_norm=max_norm,
-                                      clip_norm=True)
+            early_stop_count = 0
+            best_val_loss = float('inf')
+            for epoch in range(EPOCHS):
+                train_loss = train_model(epoch, model, dataloader, optimizer,
+                                        loss_func, max_norm=max_norm,
+                                        clip_norm=True)
+                
+                val_loss = validate_model(epoch, model, valdataloader, loss_func)
+
+                learning_curves.loc[epoch, 'train_loss'] = train_loss
+                learning_curves.loc[epoch, 'val_loss'] = val_loss
+
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    #torch.save(model.state_dict(), model_path)
+                    early_stop_count += 0
+                else:
+                    early_stop_count +=1
+
+                if early_stop_count == early_stopping:
+                    print(f'Early Stopping Applied on Epoch: {epoch}')
+                    break
+                
+
+            learning_curves.plot()
+            plt.title(f'CV Split: {idx}')
+            plt.savefig(f'learning_curves_{idx}.png')
+            plt.clf()
+
+            # scale 
+            X_test2 = X_test.copy()
+            X_test2 = scaler.transform(X_test2)
+            
+            X_test2 = torch.tensor(X_test2, dtype=torch.float32)
+            X_test2 = X_test2.cuda()
+
+            with torch.no_grad():
+                model.eval()
+                preds = model(X_test2)
+                preds = preds.cpu().detach().numpy()
+                preds=preds.reshape(preds.shape[0], )
+
+                if _loss[0] == 'Regression':
+                    preds = np.sign(preds)
+
+                if _loss[0] == 'Bin':
+                    preds -=.50
+                    preds = np.sign(preds)
+
+                preds = pd.Series(data=preds, index=y_test.index)
+                predictions.append(preds)
+            break
              
-             val_loss = validate_model(epoch, model, valdataloader, loss_func)
 
-             learning_curves.loc[epoch, 'train_loss'] = train_loss
-             learning_curves.loc[epoch, 'val_loss'] = val_loss
+        preds=pd.concat(predictions).sort_index()
+        preds = preds.to_frame(_loss[0])
+        feats = feats.join(preds[[_loss[0]]], how='left')
+        feats.dropna(subset=[_loss[0]], inplace=True)
+        dates = feats.index.get_level_values('date').unique().to_list()
+        strat_rets = process_jobs(dates, feats, signal_col=_loss[0])
+        bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench_'+_loss[0]))
+        print(bt)
+        backtests.append(bt)
 
-             if val_loss < best_val_loss:
-                 best_val_loss = val_loss
-                 torch.save(model.state_dict(), model_path)
-                 early_stop_count += 0
-             else:
-                 early_stop_count +=1
-
-             if early_stop_count == early_stopping:
-                 print(f'Early Stopping Applied on Epoch: {epoch}')
-                 break
-             
-
-         learning_curves.plot()
-         plt.title(f'CV Split: {idx}')
-         plt.savefig(f'learning_curves_{idx}.png')
-         plt.clf()
-
-         # scale 
-         X_test2 = X_test.copy()
-         X_test2 = scaler.transform(X_test2)
-        
-         X_test2 = torch.tensor(X_test2, dtype=torch.float32)
-         X_test2 = X_test2.cuda()
-
-         with torch.no_grad():
-            model.eval()
-            preds = model(X_test2)
-            preds = preds.cpu().detach().numpy()
-            preds=preds.reshape(preds.shape[0], )
-            preds = pd.Series(data=preds, index=y_test.index)
-            predictions.append(preds)
-
-         
-    preds=pd.concat(predictions).sort_index()
-    preds = preds.to_frame('mlp')
-    feats = feats.join(preds[['mlp']], how='left')
-    feats.dropna(subset=['mlp'], inplace=True)
-    dates = feats.index.get_level_values('date').unique().to_list()
-    strat_rets = process_jobs(dates, feats, signal_col='mlp')
-    print(get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench')))
 
 
        

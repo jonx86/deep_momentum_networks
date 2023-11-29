@@ -45,7 +45,7 @@ class RegressionLoss(nn.Module):
     def __init__(self):
         super(RegressionLoss, self).__init__()
 
-    def forward(pred:torch.tensor, target:torch.tensor):
+    def forward(self, pred, target):
         # pred and target are both 1d
         loss = F.mse_loss(pred, target) # lower loss is better and we are maximizing
         return loss
@@ -55,7 +55,7 @@ class BinaryClassificationLoss(nn.Module):
     def __init__(self):
         super(BinaryClassificationLoss, self).__init__()
     
-    def forward(pred: torch.tensor, target:torch.tensor):
+    def forward(self, pred, target):
         # pred and target are both 1d
         loss = F.binary_cross_entropy(pred, target)
         return -loss

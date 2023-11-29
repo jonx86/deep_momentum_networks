@@ -351,7 +351,7 @@ def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10, 
             if i>=lookback:
                 _x = X[i-lookback:i]
                 _y = y[i]
-                xs.append(_x.T if not lstm else _x)
+                xs.append(_x.T if not lstm else _x) # returns the correct dims for LSTM
                 ys.append(_y)
         return np.array(xs), np.array(ys)
     else:
@@ -361,19 +361,26 @@ def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10, 
             if i>=lookback:
                 _x = X.iloc[i-lookback:i]
                 #print(type(_x))
-                _y = y.iloc[i]
+                _y = y.iloc[i] if not lstm else y.iloc[i-lookback:i]
                 xs.append(_x) # don't transpose here, only used for the Xtest predict step
                 ys.append(_y)
         return xs, ys
     
 
-def get_seq_test_preds(model, X_test_single_future:list, features:list):
+def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:bool=False):
+    """
+    model: nn.Module like
+    X_test_single_future: list of sequences for a single future
+    features: a list of our features
+    lstm: adjustes shape incase we want to use LSTM
+    """
+
     predictions = []
     idx = []
     for x in X_test_single_future:
         # data
         data_pred = x[features].copy()
-        data_pred = data_pred.values.T # take to numpy
+        data_pred = data_pred.values.T if not lstm else data_pred.values
         data_pred = torch.tensor(data_pred, dtype=torch.float32)
 
         # we need to retain the pandas multi-index
@@ -392,7 +399,7 @@ def get_seq_test_preds(model, X_test_single_future:list, features:list):
         idx.append((x.tail(1).index.values[0], x.future[-1]))
         predictions.append(preds.squeeze().__float__())
     
-    # index
+    # reset the multi-index (date, future)
     index = pd.MultiIndex.from_tuples(tuples=idx, names=['date', 'future'])
     out = pd.Series(data=predictions, index=index)
 
@@ -408,14 +415,17 @@ def aggregate_seq_preds(model, X_test:list, features:list):
     
 def split_Xy_for_seq(X_train:pd.DataFrame, y_train:pd.DataFrame,
                      step_size, split_func=split_rolling_sequences_for_cnn,
-                     return_pandas=True)->tuple:
+                     return_pandas=True,
+                     lstm=True)->tuple:
     
     # break out x and ys
     xs, ys = [], []
 
     for future in tqdm(X_train.index.get_level_values("future").unique()):
         _x, _y = X_train.xs(future, level='future'), y_train.xs(future, level="future")
-        seq_x, seq_y = split_func(_x, _y, lookback=step_size, return_pandas=return_pandas)
+        seq_x, seq_y = split_func(_x, _y, lookback=step_size,
+                                  return_pandas=return_pandas,
+                                  lstm=lstm)
         
         if not return_pandas:
             xs.append(seq_x) # transpose to be # channels , # time
@@ -438,6 +448,93 @@ def retain_pandas_after_scale(X, scaler):
     col_names = X.columns.to_list()
     X = scaler.transform(X)
     return pd.DataFrame(X, index=idx, columns=col_names)
+
+
+class PrePTestSeqData():
+    """
+    This only operates over the X inputs , because just need to run the forward pass
+    to asses results on the test set. Needed for LSTM and CNN
+    """
+
+    def __init__(self, full_data: pd.DataFrame):
+        self.full_data = full_data
+        self.unique_dates = self.full_data.index.get_level_values('date').unique()
+
+        # discard
+        del self.full_data
+
+    @staticmethod
+    def get_single_fut_end_date(single_future:list):
+        dates = [(x.index[-1], x.future.unique()[0]) for x in single_future]
+        return dates
+    
+    @staticmethod
+    def extract_dates_only(dates:list):
+        dates = [x[0] for x in dates]
+        return dates
+    
+    def split_single_future(self, cv_split:tuple, single_future:list)->list:
+        out = []
+        min_test_date = cv_split[0]
+        max_test_date = cv_split[1]
+
+        # get all our dates
+        date_runs = self.unique_dates[(pd.to_datetime(self.unique_dates)>=pd.to_datetime(min_test_date))\
+                                       & (pd.to_datetime(self.unique_dates)<=pd.to_datetime(max_test_date))]
+
+        # now return the correct DataFrames
+        end_tups = PrePTestSeqData.get_single_fut_end_date(single_future=single_future)
+        end_dates = PrePTestSeqData.extract_dates_only(end_tups)
+
+        # gather all DFs for a single future at an end date
+        for date in date_runs:
+            if date in end_dates:
+                # need to search for the df with the correct end date
+                for seq_slice in single_future:
+                    # now finally on df level
+                    if seq_slice.index[-1] == date:
+                        out.append(seq_slice)
+
+        # NOTE This should now be the sequences leading up to the end date of every end date in a given test set IF avail for a single future
+        return out
+    
+    def run_all_splits(self, cv_split:tuple, list_of_futures_sequences:list)->list:
+        """
+        cv_split: test (start, end)
+        list_of_futures_sequences: List of batches sequences of all futures data
+        """
+
+        out = []
+        for single_future in tqdm(list_of_futures_sequences):
+            correct_seq_end = self.split_single_future(cv_split=cv_split,
+                                                       single_future=single_future)
+            out.append(correct_seq_end)
+        return out
+
+
+if __name__ == '__main__':
+    data = load_features()
+    feats = [f for f in data.columns if f.startswith('feature')]
+    target = ['target']
+    both = feats+target
+
+    full = data[both].dropna(subset=both)
+    print(full.shape)
+
+    y = full['target']
+    X = full[feats]
+
+    newX, _ = split_Xy_for_seq(X, y, step_size=63, lstm=True)
+
+    # time sequences for a single future
+    singleFuture = newX[0]
+
+    p = PrePTestSeqData(full)
+    #k = p.split_single_future(cv_split=('1995-11-01', '2000-09-05'),
+    #                          single_future=singleFuture)
+
+    k = p.run_all_splits(cv_split=('1995-11-01', '2000-09-05'),
+                         list_of_futures_sequences=newX)
 
 
 

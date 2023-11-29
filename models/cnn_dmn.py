@@ -20,13 +20,13 @@ from utils.utils import (get_cv_splits,
                          split_Xy_for_seq,
                          retain_pandas_after_scale,
                          split_rolling_sequences_for_cnn,
-                         aggregate_seq_preds)
+                         aggregate_seq_preds,
+                         PrePTestSeqData)
 
 from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from losses.jm_loss import SharpeLoss, RetLoss
-
 
 
 class SimpleCNN(nn.Module):
@@ -69,9 +69,37 @@ class SimpleCNN(nn.Module):
         outputs = self.dropOut2(torch.tanh(self.fc2(outputs)))
 
         return outputs
+    
 
+class SimpleLSTM(nn.Module):
 
+    def __init__(self, input_dim, sequence_length, hidden_size, dropout_rate=.30, lstm_layers=2):
+        super(SimpleLSTM, self).__init__()
 
+        self.input_dim = input_dim
+        self.sequence_length=sequence_length
+        self.hidden_size = hidden_size
+        self.dropout_rate = dropout_rate
+        self.lstm_layers = 2
+
+        self.lstm = nn.LSTM(input_size=self.input_dim,
+                            hidden_size=self.sequence_length,
+                            dropout=self.dropout_rate,
+                            num_layers=2)
+        
+        # all the layers
+        self.flatter = nn.Flatten()
+        self.fc1 = nn.LazyLinear()
+        self.fc2 = nn.LazyLinear()
+
+        # drop outs
+        self.dropout1 = nn.Dropout(p=self.dropout_rate)
+        self.dropout2 = nn.Dropout(p=self.dropout_rate)
+        
+    def forward(inputs, h, ct):
+        pass
+        
+        
 if __name__ == '__main__':
     sampleX = np.random.randn(100, 60, 1) # where we have batch size, feature dim, temporal dim
     sampleX_second = np.random.randn(20, 60, 5)
@@ -93,11 +121,12 @@ if __name__ == '__main__':
     # add in more
     features += lag_feats
 
-    print(features)
-
     # condense and group
     X = feats[full].dropna()
     X.dropna(inplace=True)
+
+    prep = PrePTestSeqData(X)
+    newX, _ = split_Xy_for_seq(X[features], X['target'], step_size=20)
    
     # returns the loader
     def load_data_torch(X, y, batch_size=64):
@@ -195,14 +224,14 @@ if __name__ == '__main__':
     EPOCHS = 100
     learning_rate = 1e-3
     batch_size = 512
-    hidden_layer_size = 10
-    dropout_rate = .50
+    hidden_layer_size = 5
+    dropout_rate = .30
     max_norm = 0.01
-    early_stopping = 10
+    early_stopping = 25
     #reg = 1e-5
 
     filters = 3
-    kernel_size= 5
+    kernel_size= 10
     pool_size=2
     sequence_length = 20
 
@@ -309,17 +338,23 @@ if __name__ == '__main__':
          X_test2 = X_test.copy()
          X_test2 = retain_pandas_after_scale(X_test2, scaler)
 
+         test_start, test_end = X_test.index.get_level_values('date')[0], X_test.index.get_level_values('date')[-1]
+         print(f'Test Start :{test_start} | Test End :{test_end}')
+
+         # get correct test data
+         xs1 = prep.run_all_splits((test_start, test_end), newX)
+
          # this is where we need to start our new logic to generate test data in a shape
          # able to fit into the model
-         xs, _ =split_Xy_for_seq(X_test2, y_test,
-                                 step_size=sequence_length,
-                                 split_func=split_rolling_sequences_for_cnn,
-                                 return_pandas=True)
+        #  xs, _ =split_Xy_for_seq(X_test2, y_test,
+        #                          step_size=sequence_length,
+        #                          split_func=split_rolling_sequences_for_cnn,
+        #                          return_pandas=True)
          
         
          with torch.no_grad():
             model.eval()
-            preds = aggregate_seq_preds(model, xs, features=features)
+            preds = aggregate_seq_preds(model, xs1, features=features)
             # preds = model(X_test2)
             # preds = preds.cpu().detach().numpy()
             # preds=preds.reshape(preds.shape[0], )
