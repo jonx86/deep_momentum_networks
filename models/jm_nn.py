@@ -169,7 +169,7 @@ if __name__ == '__main__':
     model_path = 'model.pt'
     EPOCHS = 100
     learning_rate = 1e-3
-    batch_size = 512
+    batch_size = 2048
     hidden_layer_size = 20
     dropout_rate = .30
     max_norm = 0.01
@@ -256,7 +256,7 @@ for _loss in [('Sharpe', SharpeLoss), ('RetLoss', RetLoss)]:
 
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
-                    #torch.save(model.state_dict(), model_path)
+                    torch.save(model.state_dict(), model_path)
                     early_stop_count += 0
                 else:
                     early_stop_count +=1
@@ -278,6 +278,7 @@ for _loss in [('Sharpe', SharpeLoss), ('RetLoss', RetLoss)]:
             X_test2 = torch.tensor(X_test2, dtype=torch.float32)
             X_test2 = X_test2.cuda()
 
+            model.load_state_dict(torch.load(model_path))
             with torch.no_grad():
                 model.eval()
                 preds = model(X_test2)
@@ -293,9 +294,8 @@ for _loss in [('Sharpe', SharpeLoss), ('RetLoss', RetLoss)]:
 
                 preds = pd.Series(data=preds, index=y_test.index)
                 predictions.append(preds)
-            break
+            
              
-
         preds=pd.concat(predictions).sort_index()
         preds = preds.to_frame(_loss[0])
         feats = feats.join(preds[[_loss[0]]], how='left')

@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 
-from losses.ryan_losses import SharpeLoss
+from losses.jm_loss import SharpeLoss
 from models.ryan_mlp import MLP
 from utils.utils import load_features, get_cv_splits, train_val_split, process_jobs, get_returns_breakout
 

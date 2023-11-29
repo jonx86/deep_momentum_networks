@@ -9,8 +9,11 @@ from joblib import Parallel, delayed
 import statsmodels.api as sml
 from pathlib import Path
 from tqdm import tqdm
-import torchimport os
-
+import torch
+import os
+from torch.utils.data import Dataset, DataLoader
+from torch.nn.utils import clip_grad_norm_
+import time
 
 def getPortVol(weights, cov, ann_factor=252):
         if ann_factor is None:
@@ -368,7 +371,7 @@ def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10, 
         return xs, ys
     
 
-def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:bool=False):
+def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:bool=False, device='cuda'):
     """
     model: nn.Module like
     X_test_single_future: list of sequences for a single future
@@ -388,8 +391,7 @@ def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:boo
         # x.reset_index(inplace=True)
         # x.set_index(['date', 'future'], inplace=True)
 
-        if torch.cuda.is_available():
-            data_pred = data_pred.cuda()
+        data_pred = data_pred.to(torch.device(device))
 
         # this one training example of size (N=1, C=60, L=20) or whatever the look-back is
         # returns size of 1
@@ -407,10 +409,10 @@ def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:boo
     return out
 
 
-def aggregate_seq_preds(model, X_test:list, features:list):
+def aggregate_seq_preds(model, X_test:list, features:list, device='cpu'):
     # return predictions
      # NOTE with roughly 8k daily observations this takes 20 minutes on cores=24 for a single strategy back-test
-    results = Parallel(n_jobs=-1, verbose=True)(delayed(get_seq_test_preds)(model, x, features) for x in X_test)
+    results = Parallel(n_jobs=-1, verbose=True)(delayed(get_seq_test_preds)(model, x, features, device) for x in X_test)
     return pd.concat(results, axis=0).sort_index()
 
     
@@ -513,29 +515,108 @@ class PrePTestSeqData():
         return out
 
 
-if __name__ == '__main__':
-    data = load_features()
-    feats = [f for f in data.columns if f.startswith('feature')]
-    target = ['target']
-    both = feats+target
+def load_data_torch(X, y, batch_size=64, device='cuda'):
+    X = torch.tensor(X, dtype=torch.float32)
+    y = torch.tensor(y.values, dtype=torch.float32)
 
-    full = data[both].dropna(subset=both)
-    print(full.shape)
+    # send to cuda
+    X.to(torch.device(device))
+    y.to(torch.device(device))
 
-    y = full['target']
-    X = full[feats]
+    loader = DataLoader(list(zip(X, y)), shuffle=False, batch_size=batch_size)
+    return loader
 
-    newX, _ = split_Xy_for_seq(X, y, step_size=63, lstm=True)
 
-    # time sequences for a single future
-    singleFuture = newX[0]
+def validate_model(epoch, model, val_loader, loss_fnc, device='cuda'):
+    iter_time = AverageMeter()
+    losses = AverageMeter()
 
-    p = PrePTestSeqData(full)
-    #k = p.split_single_future(cv_split=('1995-11-01', '2000-09-05'),
-    #                          single_future=singleFuture)
+    for idx, (data, target) in enumerate(val_loader):
+        start = time.time()
 
-    k = p.run_all_splits(cv_split=('1995-11-01', '2000-09-05'),
-                         list_of_futures_sequences=newX)
+        data = data.to(torch.device(device))
+        target = target.to(torch.device(device))
+        
+        with torch.no_grad():
+            out = model(data)
+            out = out.to(torch.device(device))
+            loss = loss_fnc(out, target)
+
+        losses.update(loss.item(), out.shape[0])
+        iter_time.update(time.time() - start)
+
+        if idx % 10==0:
+                print(('Epoch: [{0}][{1}/{2}]\t'
+                'Time {iter_time.val:.3f} ({iter_time.avg:.3f})\t'
+                'Loss {loss.val:.4f} ({loss.avg:.4f})\t').format(
+                    epoch,
+                    idx,
+                    len(val_loader),
+                    iter_time=iter_time,
+                    loss=losses))
+                
+    return losses.avg
+    
+
+class AverageMeter(object):
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+
+
+def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3, clip_norm=False, device='cuda'):
+    iter_time = AverageMeter()
+    losses = AverageMeter()
+    
+    for idx, (data, target) in enumerate(train_loader):
+        start = time.time()
+
+        data = data.to(torch.device(device))
+        target = target.to(torch.device(device))
+
+        # forward step
+        out = model(data)
+        out = out.to(torch.device(device))
+        loss = loss_fnc(out, target)
+
+        # gradient descent step
+        optimizer.zero_grad()
+        loss.backward()
+
+        # gradient norm
+        if clip_norm:
+            clip_grad_norm_(model.parameters(), max_norm=max_norm)
+
+        optimizer.step()
+
+        losses.update(loss.item(), out.shape[0])
+        iter_time.update(time.time() - start)
+
+        if idx % 10 == 0:
+                print(('Epoch: [{0}][{1}/{2}]\t'
+                'Time {iter_time.val:.3f} ({iter_time.avg:.3f})\t'
+                'Loss {loss.val:.4f} ({loss.avg:.4f})\t').format(
+                    epoch,
+                    idx,
+                    len(train_loader),
+                    iter_time=iter_time,
+                    loss=losses))
+    return losses.avg
+
+
+
 
 
 
