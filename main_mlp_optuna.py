@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
-
 import pandas as pd
+import copy
 
 from sklearn.preprocessing import RobustScaler
 
@@ -15,11 +15,13 @@ from torch.utils.data import DataLoader
 from losses import jm_loss as L
 from utils.utils import load_features, get_cv_splits, train_val_split, process_jobs, get_returns_breakout
 import optuna
-
+import numpy as np
 import os, glob, sys
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
+
+torch.manual_seed(0)
 
 ##########################################################
 # Parameters
@@ -30,14 +32,26 @@ loss_func_name = sys.argv[2]
 gpu = sys.argv[3]
 n_trials = int(sys.argv[4])
 
+batch_size_space = [256, 512, 1024, 2048]
+learning_rate_space = [10e-5, 10e-4, 10e-3, 10e-2, 10e-1, 10e0]
+maximum_gradient_norm_space = [10e-4, 10e-3, 10e-2, 10e-1, 10e0, 10e1]
+hidden_size_space = [5, 10, 20, 40, 80]
+dropout_space = [0.1, 0.2, 0.3, 0.4, 0.5]
+
+# batch_size_space = [2048]
+# learning_rate_space = [0.001]
+# maximum_gradient_norm_space = [0.01]
+# hidden_size_space = [20]
+# dropout_space = [0.3]
+
 print(model_name, loss_func_name, gpu, n_trials)
 filename = model_name + "_" + loss_func_name
-outfile = open("results/" + filename, "w")
-best_param_file_name = "results/best_params_" + filename + ".txt"
+outfile = open("results_test/" + filename + ".txt", "w")
+outfile_best_param = open("results_test/best_params_" + filename + ".txt", "w")
 model_name = model_name + loss_func_name
 
 # Parameters
-model_path = 'model_weights/' + filename + '_model_'
+model_path = 'model_weights_test/' + filename + '_model_'
 cv_global = 0
 ##########################################################
 # Training
@@ -83,6 +97,7 @@ def validate_model(epoch, model, val_loader, loss_fnc):
             target = target.to(torch.device(gpu))
 
         with torch.no_grad():
+            model.eval()
             out = model(data)
             out = out.to(torch.device(gpu))
             loss = loss_fnc(out, target)
@@ -115,6 +130,7 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, clip):
             target = target.to(torch.device(gpu))
 
         # forward step
+        model.train()
         out = model(data)
         out = out.to(torch.device(gpu))
         loss = loss_fnc(out, target)
@@ -151,7 +167,7 @@ def run_train(params):
         'input_dim': 10*6,
         'hidden_size': params['hidden_size'],
         'dropout': params['dropout'],
-        'num_classes': 1,
+        'device': gpu,
     }
 
     # our data-loaders
@@ -159,14 +175,10 @@ def run_train(params):
     valdataloader = load_data_torch(X_val, y_val, batch_size=batch_size)
 
     # model
-    current_model_path = model_path + str(cv_global) + '.pt'
-    previous_model_path = model_path + str(cv_global-1) + '.pt'
-    if os.path.exists(previous_model_path):
-        model = torch.load(previous_model_path)
-    else:
-        model = getattr(M, model_name)
-        model = model(**model_params)
+    model = getattr(M, model_name)
+    model = model(**model_params)
     model.to(gpu)
+    # print(model)
 
     optimizer = Adam(model.parameters(), lr=learning_rate)
 
@@ -181,7 +193,7 @@ def run_train(params):
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model, current_model_path)
+            best_model = copy.deepcopy(model)
             early_stop_count = 0
         else:
             early_stop_count += 1
@@ -191,14 +203,14 @@ def run_train(params):
         if early_stop_count == early_stopping:
             break
 
-    return best_val_loss
+    return best_val_loss, best_model
 def objective(trial):
 
-    batch_size = trial.suggest_categorical('batch_size', [256, 512, 1024, 2048])
-    learning_rate = trial.suggest_categorical('learning_rate', [10e-5, 10e-4, 10e-3, 10e-2, 10e-1, 10e0])
-    maximum_gradient_norm = trial.suggest_categorical('maximum_gradient_norm', [10e-4, 10e-3, 10e-2, 10e-1, 10e0, 10e1])
-    hidden_size = trial.suggest_categorical('hidden_size', [5, 10, 20, 40, 80])
-    dropout = trial.suggest_categorical('dropout', [0.1, 0.2, 0.3, 0.4, 0.5])
+    batch_size = trial.suggest_categorical('batch_size', batch_size_space)
+    learning_rate = trial.suggest_categorical('learning_rate', learning_rate_space)
+    maximum_gradient_norm = trial.suggest_categorical('maximum_gradient_norm', maximum_gradient_norm_space)
+    hidden_size = trial.suggest_categorical('hidden_size', hidden_size_space)
+    dropout = trial.suggest_categorical('dropout', dropout_space)
 
     params = {
         'batch_size': batch_size,
@@ -208,25 +220,19 @@ def objective(trial):
         'dropout': dropout,
     }
 
-    best_val_loss = run_train(params)
+    best_val_loss, best_model = run_train(params)
     return best_val_loss
 def run_hyper_parameter_tuning():
-    sampler = optuna.samplers.TPESampler(seed=42)
-    # sampler = optuna.samplers.RandomSampler(seed=42)
+    # sampler = optuna.samplers.TPESampler(seed=42)
+    sampler = optuna.samplers.RandomSampler(seed=0)
     study = optuna.create_study(sampler=sampler)
     study.optimize(objective, n_trials=n_trials, n_jobs=n_trials, show_progress_bar=True)
 
     best_params = study.best_params
-    best_loss = study.best_value
-
-    # export the best parameters
-    txt_results = open(best_param_file_name, "a")
-    print(f"Best Parameters: {best_params}", file=txt_results)
-    txt_results.close()
 
     print("Best Parameters:", best_params)
 
-    return best_params, best_loss
+    return best_params
 
 loss_func = getattr(L, loss_func_name)
 loss_func = loss_func()
@@ -278,14 +284,19 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     X_train2 = scaler.transform(X_train2)
     X_val = scaler.transform(X_val)
 
-    best_params, best_loss = run_hyper_parameter_tuning()
+    best_params = run_hyper_parameter_tuning()
+    best_val_loss, best_model = run_train(best_params)
 
-    print('Best Loss: {:.4f}'.format(best_loss))
+    print('Best Loss: {:.4f}'.format(best_val_loss))
     print('Best Params:', best_params)
     learning_curves.plot()
     plt.title(f'CV Split: {idx}')
     plt.savefig('images/' + filename + f'_learning_curves_{idx}.png')
     plt.clf()
+
+    # export the best parameters
+    print('cv: ', cv_global, file=outfile_best_param)
+    print(best_params, file=outfile_best_param, flush=True)
 
     # scale
     X_test2 = X_test.copy()
@@ -294,21 +305,16 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     X_test2 = torch.tensor(X_test2, dtype=torch.float32)
     X_test2 = X_test2.to(torch.device(gpu))
 
-    model_params = {
-        'input_dim': 10*6,
-        'hidden_size': best_params['hidden_size'],
-        'dropout': best_params['dropout'],
-        'num_classes': 1,
-    }
-
-    current_model_path = model_path + str(cv_global) + '.pt'
-    model = torch.load(current_model_path)
-    # model.load_state_dict(torch.load(model_path))
     with torch.no_grad():
-        model.eval()
-        preds = model(X_test2)
+        best_model.eval()
+        preds = best_model(X_test2)
         preds = preds.cpu().detach().numpy()
         preds=preds.reshape(preds.shape[0], )
+        if loss_func_name == 'RegressionLoss':
+            preds = np.sign(preds)
+        if loss_func_name == 'BinaryClassificationLoss':
+            preds -= .50
+            preds = np.sign(preds)
         preds = pd.Series(data=preds, index=y_test.index)
         predictions[idx] = preds
 
@@ -323,6 +329,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     values = get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench'))
     print('idx: ', idx, file=outfile)
     print(values, file=outfile, flush=True)
+    print(values)
 
 preds=pd.concat(predictions).sort_index()
 preds = preds.to_frame('mlp')
@@ -336,6 +343,7 @@ print('Final', file=outfile, flush=True)
 print(ret_breakout, file=outfile, flush=True)
 
 outfile.close()
+outfile_best_param.close()
 
 ax = strat_rets.fillna(0.).cumsum().plot()
 ax.figure.savefig('images/' + filename + '_timeline.png')
