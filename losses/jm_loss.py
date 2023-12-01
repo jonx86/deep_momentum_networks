@@ -15,6 +15,10 @@ class SharpeLoss(nn.Module):
         input and target are both 1-d
         """
 
+        if (len(input.shape)>2) and (len(target.shape)>2):
+            input = torch.flatten(input)
+            target = torch.flatten(target)
+
         ret = input * self.risk_trgt * target
         uR = torch.mean(ret)
 
@@ -34,6 +38,9 @@ class RetLoss(nn.Module):
         """
         input and target are both 1-d
         """
+        if (len(input.shape)>2) and (len(target.shape)>2):
+            input = torch.flatten(input)
+            target = torch.flatten(target)
 
         ret = input * self.risk_trgt * target
         uR = torch.mean(ret)

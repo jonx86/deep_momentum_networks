@@ -41,28 +41,36 @@ class simpleLSTM(nn.Module):
                                     hidden_size=self.hidden_dim,
                                     num_layers=1,
                                     batch_first=True)
+                
+                # you may or may not need to do this, LSTM does not work on GPU for me 
+                # and can't fix the bug as of now, params needs to be same memory block 
+                #https://discuss.pytorch.org/t/why-do-we-need-flatten-parameters-when-using-rnn-with-dataparallel/46506"
                 self.lstm.flatten_parameters()
                 
                 self.linear = nn.Linear(self.hidden_dim, 1)
                 self.dropOut1 = nn.Dropout()
 
         def forward(self, inputs):
-                #https://discuss.pytorch.org/t/why-do-we-need-flatten-parameters-when-using-rnn-with-dataparallel/46506"
                 outputs, _ = self.lstm(inputs)
                 outputs = torch.tanh(self.linear(outputs))
                 # we want to return the prediction at the last time-step , this is the position size at t+1
-                return outputs[:, -1, :]
-
+                return outputs
+        
 HIDDEN_DIM = 20
-INPUT = 20
+INPUT = 63
 DROPOUT_RATE = .30
 BATCH_SIZE = 256
 EPOCHS = 25
 LEARNING_RATE = 1e-3
 DEVICE = 'cpu'
+NUM_CORES = -1 # -1 for all cores, there are 3 multi-processed data aggregate functions, because we need to operate on the future level
 
 # used for getting the correct batching of the test set to feed into LSTM
 prep = PrePTestSeqData(X)
+
+# TODO split Xy for seq could to be multi-processed for now this is slow but works - Use joblib
+# My method to process the entire dataset first so I can filter on correct dates for test set and
+# don't need to look back a small window into train set
 newX, _ = split_Xy_for_seq(X[features], X['target'], step_size=INPUT, lstm=True)
 
 for idx, (train, test) in enumerate(get_cv_splits(X)):
@@ -86,17 +94,19 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         X_val = retain_pandas_after_scale(X_val, scaler=scaler)
 
         # this function 
-        X_val, _ = split_Xy_for_seq(X_train=X_val,
+        X_val, y_val = split_Xy_for_seq(X_train=X_val,
                                     y_train=y_val,
                                     step_size=INPUT,
                                     return_pandas=False,
-                                    lstm=True)
+                                    lstm=True,
+                                    return_seq_target=True)
         
-        X_train2, _ = split_Xy_for_seq(X_train=X_train2,
+        X_train2, y_train2 = split_Xy_for_seq(X_train=X_train2,
                                        y_train=y_train2,
                                        step_size=INPUT,
                                        return_pandas=False,
-                                       lstm=True)
+                                       lstm=True,
+                                       return_seq_target=True)
         
         train_loader = load_data_torch(X_train2, y_train2,
                                        batch_size=BATCH_SIZE,
@@ -142,13 +152,28 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         print(f'Test Start :{test_start} | Test End :{test_end}')
 
 
-        #NOTE get correct test data takes a long time looping through all 72
+        #NOTE get correct test data takes a long time looping through all 72 futures
         # futures and all over-lapping sequences with in each future
-        xs1 = prep.run_all_splits((test_start, test_end), newX)
+        # We utilize joblib again to multi-process these batches, looping through sequences within each future
+        # takes ~1.6 minutes on my machine 24-cores
+        xs1 = mpSplits(prep.split_single_future,
+                       (test_start, test_end),
+                        newX, n_jobs=NUM_CORES)
 
         with torch.no_grad():
                 model.eval()
-                preds = aggregate_seq_preds(model, xs1, features=features, device=DEVICE)
+                # feed in sequences for each future and get the predictions, take just the last time-step
+                preds = aggregate_seq_preds(model, xs1, features=features,
+                                            device=DEVICE, lstm=True,
+                                            n_jobs=NUM_CORES)
+                
+                preds = preds.to_frame('lstm')
+                feats = data.join(preds['lstm'], how='left')
+                feats.dropna(subset=['lstm'], inplace=True)
+                dates = feats.index.get_level_values('date').unique().to_list()
+                strat_rets = process_jobs(dates, feats, signal_col='lstm')
+                bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
+                print(bt)
         break
 
                 

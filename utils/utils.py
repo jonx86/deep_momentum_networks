@@ -88,9 +88,9 @@ def get_ret_single_date(data:pd.DataFrame, date:str, signal_col:str, fwd_ret_col
         return out
 
 
-def process_jobs(dates, data, signal_col):
+def process_jobs(dates, data, signal_col, n_jobs=-1):
     # NOTE with roughly 8k daily observations this takes 20 minutes on cores=24 for a single strategy back-test
-    results = Parallel(n_jobs=-1, verbose=True)(delayed(get_ret_single_date)(data, date, signal_col) for date in dates)
+    results = Parallel(n_jobs=n_jobs, verbose=True)(delayed(get_ret_single_date)(data, date, signal_col) for date in dates)
     return pd.concat(results, axis=0).sort_index()
 
 
@@ -334,7 +334,9 @@ def split_sequence_for_cnn(X, y, lookback=4, lstm=False):
     return np.array(xs), np.array(ys)
 
 
-def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10, return_pandas=False, lstm=False):
+def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10,
+                                    return_pandas=False, lstm=False,
+                                    return_seq_target=True):
     """
     If return pandas returns list of DataFrame split by a rolling look-back window.
     If not pandas returns a numpy array of size (N-lookback, Features, looback) or (N, CHin, L) --> Conv1D
@@ -342,6 +344,7 @@ def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10, 
    
     # we need to loop through the entire sequence starting at t0+looback
     N = X.shape[0]
+    #print(N)
 
     # y will always be just y[:y.shape[0]-lookback]
     if not return_pandas:
@@ -353,8 +356,12 @@ def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10, 
 
         for i in range(N):
             if i>=lookback:
+                #print(i)
                 _x = X[i-lookback:i]
-                _y = y[i]
+                if not return_seq_target:
+                    _y = y[i]
+                else:
+                    _y = y[i-lookback:i]
                 xs.append(_x.T if not lstm else _x) # returns the correct dims for LSTM
                 ys.append(_y)
         return np.array(xs), np.array(ys)
@@ -399,6 +406,11 @@ def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:boo
         preds = model(data_pred)
         preds = preds.cpu().detach().numpy()
 
+        print(f'Shape of Preds: {preds.shape}')
+
+        if lstm:
+            preds = preds[:, -1, :]
+
         idx.append((x.tail(1).index.values[0], x.future[-1]))
         predictions.append(preds.squeeze().__float__())
     
@@ -409,36 +421,78 @@ def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:boo
     return out
 
 
-def aggregate_seq_preds(model, X_test:list, features:list, device='cpu'):
+def aggregate_seq_preds(model, X_test:list, features:list, lstm=True, device='cpu', n_jobs=-1):
     # return predictions
      # NOTE with roughly 8k daily observations this takes 20 minutes on cores=24 for a single strategy back-test
-    results = Parallel(n_jobs=-1, verbose=True)(delayed(get_seq_test_preds)(model, x, features, device) for x in X_test)
+    results = Parallel(n_jobs=n_jobs, verbose=True)(delayed(get_seq_test_preds)(model, x,
+                                                                           features, lstm,
+                                                                           device) for x in X_test)
     return pd.concat(results, axis=0).sort_index()
 
+
+
+def split_Xy_inner_func(_x, _y, step_size, return_pandas, split_func, return_seq_target, lstm, future)->tuple:
+    xs, ys = [], []
+    if _x.shape[0]>=step_size:
+            seq_x, seq_y = split_func(_x, _y, lookback=step_size,
+                                    return_pandas=return_pandas,
+                                    lstm=lstm,
+                                    return_seq_target=return_seq_target)
+            if not return_pandas:
+                xs.append(seq_x) # transpose to be # channels , # time
+                ys.append(seq_y)
+            else:
+                assert isinstance(seq_x, list)
+                seq_x = [i.assign(future=future) for i in seq_x]
+                xs.append(seq_x)
+                ys.append(seq_y)
+    else:
+        print(f'Future: {future} seq length below step-size: {step_size}')
+    return (xs, ys)
+
+
+def mp_split_Xy_for_seq(X_train, y_train, step_size,
+                        return_pandas, split_func=split_rolling_sequences_for_cnn,
+                        lstm=True, return_seq_target=True, n_jobs=-1):
+    
+    jobs = []
+    for future in tqdm(X_train.index.get_level_values("future").unique()):
+        #print(future)
+        _x, _y = X_train.xs(future, level='future'), y_train.xs(future, level="future")
+        jobs.append((_x, _y, future))
+
+    results = Parallel(n_jobs=n_jobs, verbose=True)(delayed(split_Xy_inner_func)(j[0], j[1], step_size, return_pandas,
+                                                                             split_func, lstm, return_seq_target, j[2]) for j in jobs)
+    return results
     
 def split_Xy_for_seq(X_train:pd.DataFrame, y_train:pd.DataFrame,
                      step_size, split_func=split_rolling_sequences_for_cnn,
                      return_pandas=True,
-                     lstm=True)->tuple:
+                     lstm=True, return_seq_target=False)->tuple:
     
     # break out x and ys
     xs, ys = [], []
 
     for future in tqdm(X_train.index.get_level_values("future").unique()):
+        #print(future)
         _x, _y = X_train.xs(future, level='future'), y_train.xs(future, level="future")
-        seq_x, seq_y = split_func(_x, _y, lookback=step_size,
-                                  return_pandas=return_pandas,
-                                  lstm=lstm)
-        
-        if not return_pandas:
-            xs.append(seq_x) # transpose to be # channels , # time
-            ys.append(seq_y)
+        if _x.shape[0]>=step_size:
+            seq_x, seq_y = split_func(_x, _y, lookback=step_size,
+                                    return_pandas=return_pandas,
+                                    lstm=lstm, return_seq_target=return_seq_target)
+            if not return_pandas:
+                xs.append(seq_x) # transpose to be # channels , # time
+                ys.append(seq_y)
+            else:
+                assert isinstance(seq_x, list)
+                seq_x = [i.assign(future=future) for i in seq_x]
+                xs.append(seq_x)
+                ys.append(seq_y)
         else:
-            assert isinstance(seq_x, list)
-            seq_x = [i.assign(future=future) for i in seq_x]
-            xs.append(seq_x)
-            ys.append(seq_y)
-        
+            print(f'Future: {future} seq length below step-size: {step_size}')
+       
+    
+    # this needs to be outside the loop
     if not return_pandas:
         xs = np.concatenate(xs)
         ys = np.concatenate(ys)
@@ -515,9 +569,18 @@ class PrePTestSeqData():
         return out
 
 
+
+def mpSplits(func, cv_split:tuple, list_of_features_sequences:list, n_jobs=-1):
+    results = Parallel(n_jobs=n_jobs, verbose=True)(delayed(func)(cv_split, x) for x in list_of_features_sequences)
+    return results
+
+
 def load_data_torch(X, y, batch_size=64, device='cuda'):
     X = torch.tensor(X, dtype=torch.float32)
-    y = torch.tensor(y.values, dtype=torch.float32)
+    if isinstance(y, pd.Series) or isinstance(y, pd.DataFrame):
+        y = torch.tensor(y.values, dtype=torch.float32)
+    else:
+        y = torch.tensor(y, dtype=torch.float32)
 
     # send to cuda
     X.to(torch.device(device))
@@ -536,8 +599,9 @@ def validate_model(epoch, model, val_loader, loss_fnc, device='cuda'):
 
         data = data.to(torch.device(device))
         target = target.to(torch.device(device))
+        model.eval()
         
-        with torch.no_grad():
+        with torch.no_grad():   
             out = model(data)
             out = out.to(torch.device(device))
             loss = loss_fnc(out, target)
@@ -617,6 +681,26 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3
 
 
 
+if __name__ == '__main__':
+    data = load_features()
+    features = [f for f in data.columns if f.startswith('feature')]
+    target = ['target']
+    both = features+target
+    full = data[both].dropna(subset=both)
+    print(full.shape)
+    X = full[both]
 
+    #newX, _ = split_Xy_for_seq(X[features], X['target'], step_size=63, lstm=True, return_pandas=False)
 
+    # for idx, (train, test) in enumerate(get_cv_splits(X)):
+    #         learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
+    #         iter_time = AverageMeter()
+    #         train_losses = AverageMeter()
+            
+    #         # break out X and y train
+    #         X_train, y_train = train[features], train[target] 
+    #         X_test, y_test = test[features], test[target]
+    #         break
 
+    # newX, newy = split_Xy_for_seq(X_train, y_train, step_size=63, lstm=True, return_pandas=False)
+    newX, _ = mp_split_Xy_for_seq(X[features], X['target'], step_size=63, lstm=True, return_pandas=True)

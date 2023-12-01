@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 from losses.jm_loss import SharpeLoss, RetLoss, RegressionLoss, BinaryClassificationLoss
 
 np.random.seed(49)
-torch.random.seed()
+torch.manual_seed(0)
 
 class MLP(nn.Module):
     def __init__(self, hidden_size=5, dropout=.30, input_dim=60, output_dim=1):
@@ -95,6 +95,8 @@ if __name__ == '__main__':
     def validate_model(epoch, model, val_loader, loss_fnc):
         iter_time = AverageMeter()
         losses = AverageMeter()
+
+        model.eval()
 
         for idx, (data, target) in enumerate(val_loader):
             start = time.time()
@@ -169,7 +171,7 @@ if __name__ == '__main__':
     model_path = 'model.pt'
     EPOCHS = 100
     learning_rate = 1e-3
-    batch_size = 2048
+    batch_size = 512
     hidden_layer_size = 20
     dropout_rate = .30
     max_norm = 0.01
@@ -202,7 +204,7 @@ if __name__ == '__main__':
 
 
 backtests = []
-for _loss in [('Sharpe', SharpeLoss), ('RetLoss', RetLoss)]:
+for _loss in [('Sharpe', SharpeLoss)]:
         predictions = []
         # now start the loop
         for idx, (train, test) in enumerate(get_cv_splits(X)):
@@ -295,7 +297,7 @@ for _loss in [('Sharpe', SharpeLoss), ('RetLoss', RetLoss)]:
                 preds = pd.Series(data=preds, index=y_test.index)
                 predictions.append(preds)
             
-             
+               
         preds=pd.concat(predictions).sort_index()
         preds = preds.to_frame(_loss[0])
         feats = feats.join(preds[[_loss[0]]], how='left')
