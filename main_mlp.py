@@ -55,6 +55,7 @@ def validate_model(epoch, model, val_loader, loss_fnc):
     iter_time = AverageMeter()
     losses = AverageMeter()
 
+    model.eval()
     for idx, (data, target) in enumerate(val_loader):
         start = time.time()
 
@@ -87,6 +88,7 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, clip):
     iter_time = AverageMeter()
     losses = AverageMeter()
 
+    model.train()
     for idx, (data, target) in enumerate(train_loader):
         start = time.time()
 

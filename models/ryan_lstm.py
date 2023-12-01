@@ -14,7 +14,7 @@ class LSTM(nn.Module):
     self.linear = nn.Linear(self.hidden_size, 1, device=self.device)
 
   def forward(self, input):
-    output = self.lstm(input)
+    output, _ = self.lstm(input)
     output = self.linear(output)
     output = torch.tanh(output)
     return output
