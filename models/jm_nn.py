@@ -129,6 +129,8 @@ if __name__ == '__main__':
     def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3, clip_norm=False):
         iter_time = AverageMeter()
         losses = AverageMeter()
+
+        model.train()
       
         for idx, (data, target) in enumerate(train_loader):
             start = time.time()

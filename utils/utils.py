@@ -643,6 +643,8 @@ class AverageMeter(object):
 def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3, clip_norm=False, device='cuda'):
     iter_time = AverageMeter()
     losses = AverageMeter()
+
+    model.train()
     
     for idx, (data, target) in enumerate(train_loader):
         start = time.time()
@@ -681,26 +683,3 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3
 
 
 
-if __name__ == '__main__':
-    data = load_features()
-    features = [f for f in data.columns if f.startswith('feature')]
-    target = ['target']
-    both = features+target
-    full = data[both].dropna(subset=both)
-    print(full.shape)
-    X = full[both]
-
-    #newX, _ = split_Xy_for_seq(X[features], X['target'], step_size=63, lstm=True, return_pandas=False)
-
-    # for idx, (train, test) in enumerate(get_cv_splits(X)):
-    #         learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
-    #         iter_time = AverageMeter()
-    #         train_losses = AverageMeter()
-            
-    #         # break out X and y train
-    #         X_train, y_train = train[features], train[target] 
-    #         X_test, y_test = test[features], test[target]
-    #         break
-
-    # newX, newy = split_Xy_for_seq(X_train, y_train, step_size=63, lstm=True, return_pandas=False)
-    newX, _ = mp_split_Xy_for_seq(X[features], X['target'], step_size=63, lstm=True, return_pandas=True)

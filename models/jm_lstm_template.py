@@ -57,7 +57,8 @@ class simpleLSTM(nn.Module):
                 return outputs
         
 HIDDEN_DIM = 20
-INPUT = 63
+INPUT = 10
+SEC_LEN=63
 DROPOUT_RATE = .30
 BATCH_SIZE = 256
 EPOCHS = 25
@@ -71,8 +72,9 @@ prep = PrePTestSeqData(X)
 # TODO split Xy for seq could to be multi-processed for now this is slow but works - Use joblib
 # My method to process the entire dataset first so I can filter on correct dates for test set and
 # don't need to look back a small window into train set
-newX, _ = split_Xy_for_seq(X[features], X['target'], step_size=INPUT, lstm=True)
+newX, _ = split_Xy_for_seq(X[features], X['target'], step_size=SEC_LEN, lstm=True)
 
+predictions = []
 for idx, (train, test) in enumerate(get_cv_splits(X)):
         learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
         iter_time = AverageMeter()
@@ -96,14 +98,14 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         # this function 
         X_val, y_val = split_Xy_for_seq(X_train=X_val,
                                     y_train=y_val,
-                                    step_size=INPUT,
+                                    step_size=SEC_LEN,
                                     return_pandas=False,
                                     lstm=True,
                                     return_seq_target=True)
         
         X_train2, y_train2 = split_Xy_for_seq(X_train=X_train2,
                                        y_train=y_train2,
-                                       step_size=INPUT,
+                                       step_size=SEC_LEN,
                                        return_pandas=False,
                                        lstm=True,
                                        return_seq_target=True)
@@ -168,13 +170,17 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                             n_jobs=NUM_CORES)
                 
                 preds = preds.to_frame('lstm')
-                feats = data.join(preds['lstm'], how='left')
-                feats.dropna(subset=['lstm'], inplace=True)
-                dates = feats.index.get_level_values('date').unique().to_list()
-                strat_rets = process_jobs(dates, feats, signal_col='lstm')
-                bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
-                print(bt)
-        break
+                predictions.append(preds)
+
+# run back-test
+preds = pd.concat(predictions).sort_index()
+feats = data.join(preds['lstm'], how='left')
+feats.dropna(subset=['lstm'], inplace=True)
+dates = feats.index.get_level_values('date').unique().to_list()
+strat_rets = process_jobs(dates, feats, signal_col='lstm')
+bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
+print(bt)
+        
 
                 
 

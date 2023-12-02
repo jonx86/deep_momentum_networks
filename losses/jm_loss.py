@@ -94,6 +94,9 @@ if __name__ == "__main__":
     s.plot(kind='hist', bins=25, title='dist of losses')
 
 
+    
+
+
 
 
         
