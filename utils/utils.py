@@ -149,7 +149,7 @@ def build_features(data, add_tVarBM=False):
 
     # build as macd index
     data['feature_MACD_index'] = data[['feature_MACD_short', 'feature_MACD_medium', 'feature_MACD_long']].mean(axis=1)
-    
+
     # now for new features
     data['NEW_feature_skew6m'] = data.groupby(by='future')['ret'].pct_change(1).rolling(124).skew()
     data['NEW_feature_skew12m'] = data.groupby(by='future')['ret'].pct_change(1).rolling(252).skew()
@@ -341,7 +341,7 @@ def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10,
     If return pandas returns list of DataFrame split by a rolling look-back window.
     If not pandas returns a numpy array of size (N-lookback, Features, looback) or (N, CHin, L) --> Conv1D
     """
-   
+
     # we need to loop through the entire sequence starting at t0+looback
     N = X.shape[0]
     #print(N)
@@ -376,7 +376,7 @@ def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10,
                 xs.append(_x) # don't transpose here, only used for the Xtest predict step
                 ys.append(_y)
         return xs, ys
-    
+
 
 def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:bool=False, device='cuda'):
     """
@@ -413,7 +413,7 @@ def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:boo
 
         idx.append((x.tail(1).index.values[0], x.future[-1]))
         predictions.append(preds.squeeze().__float__())
-    
+
     # reset the multi-index (date, future)
     index = pd.MultiIndex.from_tuples(tuples=idx, names=['date', 'future'])
     out = pd.Series(data=predictions, index=index)
@@ -454,7 +454,7 @@ def split_Xy_inner_func(_x, _y, step_size, return_pandas, split_func, return_seq
 def mp_split_Xy_for_seq(X_train, y_train, step_size,
                         return_pandas, split_func=split_rolling_sequences_for_cnn,
                         lstm=True, return_seq_target=True, n_jobs=-1):
-    
+
     jobs = []
     for future in tqdm(X_train.index.get_level_values("future").unique()):
         #print(future)
@@ -464,12 +464,12 @@ def mp_split_Xy_for_seq(X_train, y_train, step_size,
     results = Parallel(n_jobs=n_jobs, verbose=True)(delayed(split_Xy_inner_func)(j[0], j[1], step_size, return_pandas,
                                                                              split_func, lstm, return_seq_target, j[2]) for j in jobs)
     return results
-    
+
 def split_Xy_for_seq(X_train:pd.DataFrame, y_train:pd.DataFrame,
                      step_size, split_func=split_rolling_sequences_for_cnn,
                      return_pandas=True,
                      lstm=True, return_seq_target=False)->tuple:
-    
+
     # break out x and ys
     xs, ys = [], []
 
@@ -490,13 +490,13 @@ def split_Xy_for_seq(X_train:pd.DataFrame, y_train:pd.DataFrame,
                 ys.append(seq_y)
         else:
             print(f'Future: {future} seq length below step-size: {step_size}')
-       
-    
+
+
     # this needs to be outside the loop
     if not return_pandas:
         xs = np.concatenate(xs)
         ys = np.concatenate(ys)
-    
+
     return xs, ys
 
 def retain_pandas_after_scale(X, scaler):
@@ -524,12 +524,12 @@ class PrePTestSeqData():
     def get_single_fut_end_date(single_future:list):
         dates = [(x.index[-1], x.future.unique()[0]) for x in single_future]
         return dates
-    
+
     @staticmethod
     def extract_dates_only(dates:list):
         dates = [x[0] for x in dates]
         return dates
-    
+
     def split_single_future(self, cv_split:tuple, single_future:list)->list:
         out = []
         min_test_date = cv_split[0]
@@ -554,7 +554,7 @@ class PrePTestSeqData():
 
         # NOTE This should now be the sequences leading up to the end date of every end date in a given test set IF avail for a single future
         return out
-    
+
     def run_all_splits(self, cv_split:tuple, list_of_futures_sequences:list)->list:
         """
         cv_split: test (start, end)
@@ -600,8 +600,8 @@ def validate_model(epoch, model, val_loader, loss_fnc, device='cuda'):
         data = data.to(torch.device(device))
         target = target.to(torch.device(device))
         model.eval()
-        
-        with torch.no_grad():   
+
+        with torch.no_grad():
             out = model(data)
             out = out.to(torch.device(device))
             loss = loss_fnc(out, target)
@@ -618,9 +618,9 @@ def validate_model(epoch, model, val_loader, loss_fnc, device='cuda'):
                     len(val_loader),
                     iter_time=iter_time,
                     loss=losses))
-                
+
     return losses.avg
-    
+
 
 class AverageMeter(object):
     def __init__(self):
@@ -651,6 +651,7 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3
 
         data = data.to(torch.device(device))
         target = target.to(torch.device(device))
+        model.eval()
 
         # forward step
         out = model(data)

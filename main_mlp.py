@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 
-from losses.jm_loss import SharpeLoss
+from losses.ryan_losses import SharpeLoss
 from models.ryan_mlp import MLP
 from utils.utils import load_features, get_cv_splits, train_val_split, process_jobs, get_returns_breakout
 
@@ -43,10 +43,6 @@ def load_data_torch(X, y, batch_size=64):
     X = torch.tensor(X, dtype=torch.float32)
     y = torch.tensor(y.values, dtype=torch.float32)
 
-    # send to cuda
-    X.to(torch.device('cuda'))
-    y.to(torch.device('cuda'))
-
     loader = DataLoader(list(zip(X, y)), shuffle=False, batch_size=batch_size)
     return loader
 
@@ -56,17 +52,11 @@ def validate_model(epoch, model, val_loader, loss_fnc):
     losses = AverageMeter()
 
     model.eval()
-
     for idx, (data, target) in enumerate(val_loader):
         start = time.time()
 
-        if torch.cuda.is_available:
-            data = data.cuda()
-            target = target.cuda()
-
         with torch.no_grad():
             out = model(data)
-            out = out.cuda()
             loss = loss_fnc(out, target)
 
         losses.update(loss.item(), out.shape[0])
@@ -91,16 +81,12 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, clip):
 
     model.train()
 
+    model.train()
     for idx, (data, target) in enumerate(train_loader):
         start = time.time()
 
-        if torch.cuda.is_available():
-            data = data.cuda()
-            target = target.cuda()
-
         # forward step
         out = model(data)
-        out = out.cuda()
         loss = loss_fnc(out, target)
 
         # gradient descent step
@@ -145,7 +131,7 @@ X = dataset[features + target]
 # Parameters
 model_path = 'model.pt'
 early_stopping = 25
-device = torch.device('cuda')
+device = torch.device('cpu')
 number_of_features = 10
 epochs = 100
 dropout = 0.3
@@ -188,7 +174,6 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         print('model loaded')
         model.load_state_dict(torch.load(model_path))
         os.remove(model_path)
-    model.to(torch.device('cuda'))
 
     optimizer = Adam(model.parameters(), lr=learning_rate)
     loss_func = SharpeLoss()
@@ -222,7 +207,6 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     X_test2 = scaler.transform(X_test2)
 
     X_test2 = torch.tensor(X_test2, dtype=torch.float32)
-    X_test2 = X_test2.cuda()
 
     model.load_state_dict(torch.load(model_path))
     with torch.no_grad():
