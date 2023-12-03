@@ -10,8 +10,13 @@ class LSTM(nn.Module):
     self.dropout = dropout
     self.device = device
 
-    self.lstm = nn.LSTM(self.input_size, self.hidden_size, batch_first=True, dropout=self.dropout, device=self.device)
-    self.linear = nn.Linear(self.hidden_size, 1, device=self.device)
+    self.lstm = nn.LSTM(self.input_size, self.hidden_size,
+                        batch_first=True,
+                        dropout=self.dropout,
+                        device=self.device)
+    
+    self.linear = nn.Linear(self.hidden_size, 1,
+                            device=self.device)
 
   def forward(self, input):
     output, _ = self.lstm(input)

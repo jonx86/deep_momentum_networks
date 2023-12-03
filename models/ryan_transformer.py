@@ -25,7 +25,10 @@ class Transformer(nn.Module):
         encoding[:, 1::2] = torch.cos(position / denominator)
         self.register_buffer("encoding", encoding[None, :, :])
 
-        self.transformer = nn.Transformer(d_model=self.hidden_size, nhead=self.number_of_heads, num_encoder_layers=self.number_of_encoder_layers, num_decoder_layers=self.number_of_decoder_layers, dropout=dropout, batch_first=True, device=self.device)
+        self.transformer = nn.Transformer(d_model=self.hidden_size, nhead=self.number_of_heads,
+                                          num_encoder_layers=self.number_of_encoder_layers,
+                                          num_decoder_layers=self.number_of_decoder_layers,
+                                          dropout=dropout, batch_first=True, device=self.device)
 
         self.linear = nn.Linear(self.hidden_size, 1, device=self.device)
 

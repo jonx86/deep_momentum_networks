@@ -378,7 +378,7 @@ def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10,
         return xs, ys
 
 
-def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:bool=False, device='cuda'):
+def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:bool=False, seq_out=True, device='cuda'):
     """
     model: nn.Module like
     X_test_single_future: list of sequences for a single future
@@ -403,12 +403,13 @@ def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:boo
         # this one training example of size (N=1, C=60, L=20) or whatever the look-back is
         # returns size of 1
         data_pred = data_pred.unsqueeze(0) # add dim 0=1 for a single training example
+        #print(data_pred.shape)
         preds = model(data_pred)
         preds = preds.cpu().detach().numpy()
 
-        print(f'Shape of Preds: {preds.shape}')
+        #print(f'Shape of Preds: {preds.shape}')
 
-        if lstm:
+        if seq_out:
             preds = preds[:, -1, :]
 
         idx.append((x.tail(1).index.values[0], x.future[-1]))
@@ -421,12 +422,13 @@ def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:boo
     return out
 
 
-def aggregate_seq_preds(model, X_test:list, features:list, lstm=True, device='cpu', n_jobs=-1):
+def aggregate_seq_preds(model, X_test:list, features:list, lstm=True, seq_out=True, device='cpu', n_jobs=-1):
     # return predictions
      # NOTE with roughly 8k daily observations this takes 20 minutes on cores=24 for a single strategy back-test
     results = Parallel(n_jobs=n_jobs, verbose=True)(delayed(get_seq_test_preds)(model, x,
-                                                                           features, lstm,
-                                                                           device) for x in X_test)
+                                                                               features, lstm,
+                                                                               seq_out,
+                                                                               device) for x in X_test)
     return pd.concat(results, axis=0).sort_index()
 
 
@@ -468,8 +470,9 @@ def mp_split_Xy_for_seq(X_train, y_train, step_size,
 def split_Xy_for_seq(X_train:pd.DataFrame, y_train:pd.DataFrame,
                      step_size, split_func=split_rolling_sequences_for_cnn,
                      return_pandas=True,
-                     lstm=True, return_seq_target=False)->tuple:
-
+                     lstm=True,
+                     return_seq_target=False)->tuple:
+    
     # break out x and ys
     xs, ys = [], []
 
@@ -490,7 +493,6 @@ def split_Xy_for_seq(X_train:pd.DataFrame, y_train:pd.DataFrame,
                 ys.append(seq_y)
         else:
             print(f'Future: {future} seq length below step-size: {step_size}')
-
 
     # this needs to be outside the loop
     if not return_pandas:
@@ -567,7 +569,6 @@ class PrePTestSeqData():
                                                        single_future=single_future)
             out.append(correct_seq_end)
         return out
-
 
 
 def mpSplits(func, cv_split:tuple, list_of_features_sequences:list, n_jobs=-1):

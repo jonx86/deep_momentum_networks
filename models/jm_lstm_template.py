@@ -10,14 +10,17 @@ from sklearn.model_selection import ParameterSampler
 import time
 
 from sklearn.preprocessing import RobustScaler
-
 from utils.utils import *
 
 from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from losses.jm_loss import SharpeLoss, RetLoss
+from models.ryan_transformer import Transformer
 
+############## SET SEED ############## 
+torch.manual_seed(0)
+######################################
 
 data = load_features()
 features = [f for f in data.columns if f.startswith('feature')]
@@ -25,8 +28,6 @@ target = ['target']
 both = features+target
 
 full = data[both].dropna(subset=both)
-print(full.shape)
-
 X = full[both]
 
 
@@ -56,11 +57,44 @@ class simpleLSTM(nn.Module):
                 # we want to return the prediction at the last time-step , this is the position size at t+1
                 return outputs
         
+
+class FullLSTM(nn.Module):
+        def __init__(self, input_dim, hidden_dim, dropout_rate=.30):
+                super(simpleLSTM, self).__init__()
+                self.input_dim = input_dim
+                self.hidden_dim = hidden_dim
+                self.dropout_rate = dropout_rate
+
+                self.lstm = nn.LSTM(input_size=self.input_dim,
+                                    hidden_size=self.hidden_dim,
+                                    num_layers=1,
+                                    batch_first=True)
+                
+                # you may or may not need to do this, LSTM does not work on GPU for me 
+                # and can't fix the bug as of now, params needs to be same memory block 
+                #https://discuss.pytorch.org/t/why-do-we-need-flatten-parameters-when-using-rnn-with-dataparallel/46506"
+                self.lstm.flatten_parameters()
+                
+                # fully connecte4d block, 2-layer MLP
+                self.fcBlock = nn.Sequential(
+                        nn.LazyLinear(self.hidden_dim),
+                        nn.Tanh(),
+                        nn.Dropout(p=self.dropout_rate),
+                        nn.LazyLinear(out_features=1),
+                        nn.Tanh())
+
+        def forward(self, inputs):
+                outputs, _ = self.lstm(inputs)
+                outputs = self.fcBlock(outputs)
+                return outputs
+
+
+
 HIDDEN_DIM = 20
 INPUT = 10
 SEC_LEN=63
 DROPOUT_RATE = .30
-BATCH_SIZE = 256
+BATCH_SIZE = 512
 EPOCHS = 25
 LEARNING_RATE = 1e-3
 DEVICE = 'cpu'
@@ -72,7 +106,9 @@ prep = PrePTestSeqData(X)
 # TODO split Xy for seq could to be multi-processed for now this is slow but works - Use joblib
 # My method to process the entire dataset first so I can filter on correct dates for test set and
 # don't need to look back a small window into train set
+
 newX, _ = split_Xy_for_seq(X[features], X['target'], step_size=SEC_LEN, lstm=True)
+
 
 predictions = []
 for idx, (train, test) in enumerate(get_cv_splits(X)):
@@ -118,9 +154,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                      batch_size=BATCH_SIZE,
                                      device=DEVICE)
 
-        model = simpleLSTM(input_dim=INPUT,
-                           hidden_dim=HIDDEN_DIM,
-                           dropout_rate=DROPOUT_RATE)
+        model = FullLSTM(input_dim=INPUT, hidden_dim=HIDDEN_DIM)
         
         model.to(torch.device(DEVICE))
         optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
@@ -143,6 +177,10 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                           loss_fnc=loss_fnc,
                                           device=DEVICE)
                 
+        
+        learning_curves.loc[epoch, 'train_loss'] = train_loss
+        learning_curves.loc[epoch, 'val_loss'] = val_loss
+                
         X_test2 = X_test.copy()
         X_test2 = scaler.transform(X_test2)
 
@@ -152,7 +190,6 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         # we need a tuple of the test set start and end dates
         test_start, test_end = X_test.index.get_level_values('date')[0], X_test.index.get_level_values('date')[-1]
         print(f'Test Start :{test_start} | Test End :{test_end}')
-
 
         #NOTE get correct test data takes a long time looping through all 72 futures
         # futures and all over-lapping sequences with in each future
@@ -165,14 +202,17 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         with torch.no_grad():
                 model.eval()
                 # feed in sequences for each future and get the predictions, take just the last time-step
-                preds = aggregate_seq_preds(model, xs1, features=features,
-                                            device=DEVICE, lstm=True,
-                                            n_jobs=NUM_CORES)
+                preds = aggregate_seq_preds(model, xs1,
+                                            features=features,
+                                            device=DEVICE,
+                                            lstm=True,
+                                            seq_out=True,
+                                            n_jobs=16)
                 
                 preds = preds.to_frame('lstm')
                 predictions.append(preds)
 
-# run back-test
+        # run back-test
 preds = pd.concat(predictions).sort_index()
 feats = data.join(preds['lstm'], how='left')
 feats.dropna(subset=['lstm'], inplace=True)
@@ -180,8 +220,7 @@ dates = feats.index.get_level_values('date').unique().to_list()
 strat_rets = process_jobs(dates, feats, signal_col='lstm')
 bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
 print(bt)
-        
-
+      
                 
 
         

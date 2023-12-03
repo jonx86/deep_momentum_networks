@@ -15,9 +15,9 @@ from losses.ryan_losses import SharpeLoss
 from models.ryan_mlp import MLP
 from utils.utils import load_features, get_cv_splits, train_val_split, process_jobs, get_returns_breakout
 
-
 import os
-
+torch.manual_seed(0)
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 outfile = open("outputs", "w")
 
@@ -134,11 +134,12 @@ early_stopping = 25
 device = torch.device('cpu')
 number_of_features = 10
 epochs = 100
-dropout = 0.3
-hidden_size = 20
-batch_size = 2048
+dropout = 0.2
+hidden_size = 40
+batch_size = 256
 learning_rate = 0.001
-maximum_gradient_norm = 0.01
+maximum_gradient_norm = 0.1
+lr_scheduler = True
 
 
 if os.path.exists(model_path):
@@ -169,20 +170,32 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     valdataloader = load_data_torch(X_val, y_val, batch_size=batch_size)
 
     # model
-    model = MLP(lookback_size=5, input_size=number_of_features, hidden_size=hidden_size, dropout=dropout, device=device)
+    model = MLP(lookback_size=5, input_size=number_of_features,
+                hidden_size=hidden_size,
+                dropout=dropout, device=device)
     if os.path.exists(model_path):
         print('model loaded')
         model.load_state_dict(torch.load(model_path))
         os.remove(model_path)
 
     optimizer = Adam(model.parameters(), lr=learning_rate)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min',
+                                 factor=.5, verbose=True)
     loss_func = SharpeLoss()
 
     early_stop_count = 0
     best_val_loss = float('inf')
     for epoch in range(epochs):
-        train_loss = train_model(epoch, model, dataloader, optimizer, loss_func, maximum_gradient_norm)
-        val_loss = validate_model(epoch, model, valdataloader, loss_func)
+        train_loss = train_model(epoch, model, dataloader,
+                                 optimizer, loss_func,
+                                 maximum_gradient_norm)
+        
+        val_loss = validate_model(epoch, model,
+                                  valdataloader,
+                                  loss_func)
+
+        if lr_scheduler:
+            scheduler.step(val_loss)
 
         learning_curves.loc[epoch, 'train_loss'] = train_loss
         learning_curves.loc[epoch, 'val_loss'] = val_loss
