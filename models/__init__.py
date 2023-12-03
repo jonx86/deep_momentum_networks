@@ -1,1 +1,2 @@
-from .mlp import SimpleMLP, MLP, MLPSharpeLoss, MLPRetLoss, MLPRegressionLoss, MLPBinaryClassificationLoss
+from .mlp import MLPSharpeLoss, MLPRetLoss, MLPRegressionLoss, MLPBinaryClassificationLoss
+from .linear import LinearSharpeLoss, LinearRetLoss, LinearRegressionLoss, LinearBinaryClassificationLoss
