@@ -195,7 +195,7 @@ def run_train(params):
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            # best_model = copy.deepcopy(model)
+            best_model = copy.deepcopy(model)
             early_stop_count = 0
         else:
             early_stop_count += 1
@@ -205,8 +205,8 @@ def run_train(params):
         if early_stop_count == early_stopping:
             break
 
-    # return best_val_loss, best_model
-    return best_val_loss, model
+    return best_val_loss, best_model
+    # return best_val_loss, model
 
 def objective(trial):
 
@@ -227,8 +227,8 @@ def objective(trial):
     best_val_loss, best_model = run_train(params)
     return best_val_loss
 def run_hyper_parameter_tuning():
-    sampler = optuna.samplers.TPESampler(seed=42)
-    # sampler = optuna.samplers.RandomSampler(seed=0)
+    # sampler = optuna.samplers.TPESampler(seed=42)
+    sampler = optuna.samplers.RandomSampler(seed=0)
     study = optuna.create_study(sampler=sampler)
     study.optimize(objective, n_trials=n_trials, n_jobs=n_trials, show_progress_bar=True)
 
@@ -282,10 +282,11 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
 
     scaler = RobustScaler()
-    X_train = scaler.fit_transform(X_train)
+
+    # we only scale the 90% train X , so we don't learn the mean and sigma of the validation set
+    X_train2 = scaler.fit_transform(X_train2)
 
     # now scaler X_train2 and Xval
-    X_train2 = scaler.transform(X_train2)
     X_val = scaler.transform(X_val)
 
     best_params = run_hyper_parameter_tuning()
