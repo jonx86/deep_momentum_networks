@@ -380,8 +380,8 @@ def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10,
                 _x = X.iloc[i-lookback:i]
                 #print(type(_x))
                 _y = y.iloc[i] if not lstm else y.iloc[i-lookback:i]
-                xs.append(_x) # don't transpose here, only used for the Xtest predict step
-                ys.append(_y)
+                xs.append(_x.astype('float32')) # don't transpose here, only used for the Xtest predict step
+                ys.append(_y.astype('float32'))
         return xs, ys
 
 
@@ -505,8 +505,8 @@ def split_Xy_for_seq(X_train:pd.DataFrame, y_train:pd.DataFrame,
 
     # this needs to be outside the loop
     if not return_pandas:
-        xs = np.concatenate(xs)
-        ys = np.concatenate(ys)
+        xs = np.concatenate(xs, dtype=np.float32)
+        ys = np.concatenate(ys, dtype=np.float32)
 
     return xs, ys
 
@@ -693,5 +693,4 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3
 
 
 
-if __name__ == '__main__':
-    data = load_features()
+
