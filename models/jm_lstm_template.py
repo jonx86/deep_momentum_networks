@@ -120,6 +120,7 @@ try:
 except Exception:
         newX, _ = split_Xy_for_seq(X[features], X['target'],
                                    step_size=SEC_LEN,
+                                   return_seq_target=True,
                                    lstm=True)
 
         with open(FILENAME, "wb") as f:

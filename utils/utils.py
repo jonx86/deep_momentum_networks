@@ -118,7 +118,7 @@ def get_returns_breakout(strats: pd.DataFrame):
     return ret_breakout
 
 
-def build_features(data, add_tVarBM=False):
+def build_features(data, add_tVarBM=True):
     """
     builds the momentum features mentioned in the paper
     """
@@ -164,12 +164,17 @@ def build_features(data, add_tVarBM=False):
         data['NEW_feature_tval6M'] = data.groupby(by='future')['ret'].rolling(124).apply(lambda x: tVarLinR(x)).droplevel(0)
         data['NEW_feature_tval12M'] = data.groupby(by='future')['ret'].rolling(252).apply(lambda x: tVarLinR(x)).droplevel(0)
 
-    # create lagged features
+    # Create lagged features
     _features = [f for f in data.columns if f.startswith('feature')]
     for lag in [1, 2, 3, 4, 5]:
         for feat in _features:
             data[f'lag{lag}_{feat}'] = data.groupby(by='future')[feat].shift(lag)
 
+    # Create lagged features on the NEW variables
+    _features = [f for f in data.columns if f.startswith('NEW')]
+    for lag in [1, 2, 3, 4, 5]:
+        for feat in _features:
+            data[f'lag{lag}_{feat}'] = data.groupby(by='future')[feat].shift(lag)
 
     # also build the target - target is +1D risk adjusted return
     data['fwd_ret1d'] = data.groupby(by='future')['1d_ret'].shift(-1)
@@ -237,7 +242,7 @@ def plot_strats(strats:pd.DataFrame, log_scale=True):
     plt.savefig('strat_perf.png', dpi=300, bbox_inches='tight')
 
 
-def load_features()-> pd.DataFrame:
+def load_features(file_name='features.parquet')-> pd.DataFrame:
     """
     Creates the features if they don't already exist otherwise reads them from disk
     """
@@ -245,14 +250,14 @@ def load_features()-> pd.DataFrame:
     root = Path(__file__).parents[1].__str__()
 
     try:
-        feats = pd.read_parquet(Path(root, 'features.parquet'))
+        feats = pd.read_parquet(Path(root, file_name))
         return feats
     except Exception as e:
         tr_index = pd.read_parquet(Path(root, 'future_total_return_index.parquet'))
         feats = build_features(tr_index)
 
         # save out now
-        feats.to_parquet(Path(root, 'features.parquet'))
+        feats.to_parquet(Path(root, file_name))
         return feats
 
 
@@ -688,4 +693,5 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3
 
 
 
-
+if __name__ == '__main__':
+    data = load_features()
