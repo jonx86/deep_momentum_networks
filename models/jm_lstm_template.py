@@ -17,6 +17,8 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from losses.jm_loss import SharpeLoss, RetLoss
 from models.ryan_transformer import Transformer
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+import time
 
 ############## SET SEED ############## 
 torch.manual_seed(0)
@@ -60,7 +62,7 @@ class simpleLSTM(nn.Module):
 
 class FullLSTM(nn.Module):
         def __init__(self, input_dim, hidden_dim, dropout_rate=.30):
-                super(simpleLSTM, self).__init__()
+                super(FullLSTM, self).__init__()
                 self.input_dim = input_dim
                 self.hidden_dim = hidden_dim
                 self.dropout_rate = dropout_rate
@@ -107,7 +109,23 @@ prep = PrePTestSeqData(X)
 # My method to process the entire dataset first so I can filter on correct dates for test set and
 # don't need to look back a small window into train set
 
-newX, _ = split_Xy_for_seq(X[features], X['target'], step_size=SEC_LEN, lstm=True)
+FILENAME = f"xs_{SEC_LEN}.pickle" # incase we want to test different sequence lenghts
+
+try:
+    with open(FILENAME, "rb") as f:
+            print('loading pickle .....')
+            start = time.time()
+            newX = pickle.load(f)
+            print(f"Loading pickle took: {time.time() - start}")
+except Exception:
+        newX, _ = split_Xy_for_seq(X[features], X['target'],
+                                   step_size=SEC_LEN,
+                                   lstm=True)
+
+        with open(FILENAME, "wb") as f:
+                pickle.dump(newX, f)
+                print("dumped file")
+        
 
 
 predictions = []
@@ -158,6 +176,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         
         model.to(torch.device(DEVICE))
         optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=True)
         loss_fnc = SharpeLoss(risk_trgt=.15)
         
         # now iterate though all the epochs
@@ -177,7 +196,9 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                           loss_fnc=loss_fnc,
                                           device=DEVICE)
                 
-        
+                scheduler.step(val_loss)
+                
+                
         learning_curves.loc[epoch, 'train_loss'] = train_loss
         learning_curves.loc[epoch, 'val_loss'] = val_loss
                 

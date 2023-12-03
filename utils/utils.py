@@ -14,6 +14,8 @@ import os
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils import clip_grad_norm_
 import time
+import pickle
+
 
 def getPortVol(weights, cov, ann_factor=252):
         if ann_factor is None:
@@ -465,7 +467,9 @@ def mp_split_Xy_for_seq(X_train, y_train, step_size,
 
     results = Parallel(n_jobs=n_jobs, verbose=True)(delayed(split_Xy_inner_func)(j[0], j[1], step_size, return_pandas,
                                                                              split_func, lstm, return_seq_target, j[2]) for j in jobs)
-    return results
+    xs = [_x[0] for _x in results]
+    ys = [_x[1] for _x in results]
+    return xs, ys
 
 def split_Xy_for_seq(X_train:pd.DataFrame, y_train:pd.DataFrame,
                      step_size, split_func=split_rolling_sequences_for_cnn,
@@ -644,7 +648,6 @@ class AverageMeter(object):
 def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3, clip_norm=False, device='cuda'):
     iter_time = AverageMeter()
     losses = AverageMeter()
-
     model.train()
     
     for idx, (data, target) in enumerate(train_loader):
@@ -682,6 +685,7 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3
                     iter_time=iter_time,
                     loss=losses))
     return losses.avg
+
 
 
 
