@@ -27,14 +27,16 @@ torch.manual_seed(0)
 # Parameters
 ##########################################################
 
+# Example: python main_mlp_optuna.py MLP SharpeLoss cuda:0 50
+
 model_name = sys.argv[1]
 loss_func_name = sys.argv[2]
 gpu = sys.argv[3]
 n_trials = int(sys.argv[4])
 
 batch_size_space = [256, 512, 1024, 2048]
-learning_rate_space = [10e-5, 10e-4, 10e-3, 10e-2, 10e-1, 10e0]
-maximum_gradient_norm_space = [10e-4, 10e-3, 10e-2, 10e-1, 10e0, 10e1]
+learning_rate_space = [10**-5, 10**-4, 10**-3, 10**-2, 10**-1, 10**0]
+maximum_gradient_norm_space = [10**-4, 10**-3, 10**-2, 10**-1, 10**0, 10**1]
 hidden_size_space = [5, 10, 20, 40, 80]
 dropout_space = [0.1, 0.2, 0.3, 0.4, 0.5]
 
@@ -46,12 +48,12 @@ dropout_space = [0.1, 0.2, 0.3, 0.4, 0.5]
 
 print(model_name, loss_func_name, gpu, n_trials)
 filename = model_name + "_" + loss_func_name
-outfile = open("results_test/" + filename + ".txt", "w")
-outfile_best_param = open("results_test/best_params_" + filename + ".txt", "w")
+outfile = open("results/" + filename + ".txt", "w")
+outfile_best_param = open("results/best_params_" + filename + ".txt", "w")
 model_name = model_name + loss_func_name
 
 # Parameters
-model_path = 'model_weights_test/' + filename + '_model_'
+model_path = 'model_weights/' + filename + '_model_'
 cv_global = 0
 ##########################################################
 # Training
@@ -193,7 +195,7 @@ def run_train(params):
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_model = copy.deepcopy(model)
+            # best_model = copy.deepcopy(model)
             early_stop_count = 0
         else:
             early_stop_count += 1
@@ -203,7 +205,9 @@ def run_train(params):
         if early_stop_count == early_stopping:
             break
 
-    return best_val_loss, best_model
+    # return best_val_loss, best_model
+    return best_val_loss, model
+
 def objective(trial):
 
     batch_size = trial.suggest_categorical('batch_size', batch_size_space)
@@ -223,8 +227,8 @@ def objective(trial):
     best_val_loss, best_model = run_train(params)
     return best_val_loss
 def run_hyper_parameter_tuning():
-    # sampler = optuna.samplers.TPESampler(seed=42)
-    sampler = optuna.samplers.RandomSampler(seed=0)
+    sampler = optuna.samplers.TPESampler(seed=42)
+    # sampler = optuna.samplers.RandomSampler(seed=0)
     study = optuna.create_study(sampler=sampler)
     study.optimize(objective, n_trials=n_trials, n_jobs=n_trials, show_progress_bar=True)
 
