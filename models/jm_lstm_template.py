@@ -155,15 +155,15 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                     y_train=y_val,
                                     step_size=SEC_LEN,
                                     return_pandas=False,
-                                    lstm=True,
-                                    return_seq_target=True)
+                                    lstm=False,
+                                    return_seq_target=False)
         
         X_train2, y_train2 = split_Xy_for_seq(X_train=X_train2,
                                        y_train=y_train2,
                                        step_size=SEC_LEN,
                                        return_pandas=False,
-                                       lstm=True,
-                                       return_seq_target=True)
+                                       lstm=False,
+                                       return_seq_target=False)
         
         train_loader = load_data_torch(X_train2, y_train2,
                                        batch_size=BATCH_SIZE,

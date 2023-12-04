@@ -505,8 +505,8 @@ def split_Xy_for_seq(X_train:pd.DataFrame, y_train:pd.DataFrame,
 
     # this needs to be outside the loop
     if not return_pandas:
-        xs = np.concatenate(xs, dtype=np.float32)
-        ys = np.concatenate(ys, dtype=np.float32)
+        xs = np.concatenate(xs)
+        ys = np.concatenate(ys)
 
     return xs, ys
 
