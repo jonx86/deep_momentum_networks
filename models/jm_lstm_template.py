@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 from losses.jm_loss import SharpeLoss, RetLoss
 from models.ryan_transformer import Transformer
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 import time
 
 ############## SET SEED ############## 
@@ -90,17 +91,18 @@ class FullLSTM(nn.Module):
                 outputs = self.fcBlock(outputs)
                 return outputs
 
-
-
+# early stopping
+EARLY_STOPPING = 25
+model_path = 'lstm.pt'
 HIDDEN_DIM = 20
 INPUT = 10
 SEC_LEN=63
 DROPOUT_RATE = .30
 BATCH_SIZE = 512
-EPOCHS = 25
+EPOCHS = 100
 LEARNING_RATE = 1e-3
 DEVICE = 'cpu'
-NUM_CORES = -1 # -1 for all cores, there are 3 multi-processed data aggregate functions, because we need to operate on the future level
+NUM_CORES = 8 # -1 for all cores, there are 3 multi-processed data aggregate functions, because we need to operate on the future level
 
 # used for getting the correct batching of the test set to feed into LSTM
 prep = PrePTestSeqData(X)
@@ -155,15 +157,15 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                     y_train=y_val,
                                     step_size=SEC_LEN,
                                     return_pandas=False,
-                                    lstm=False,
-                                    return_seq_target=False)
+                                    lstm=True,
+                                    return_seq_target=True)
         
         X_train2, y_train2 = split_Xy_for_seq(X_train=X_train2,
                                        y_train=y_train2,
                                        step_size=SEC_LEN,
                                        return_pandas=False,
-                                       lstm=False,
-                                       return_seq_target=False)
+                                       lstm=True,
+                                       return_seq_target=True)
         
         train_loader = load_data_torch(X_train2, y_train2,
                                        batch_size=BATCH_SIZE,
@@ -173,13 +175,15 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                      batch_size=BATCH_SIZE,
                                      device=DEVICE)
 
-        model = FullLSTM(input_dim=INPUT, hidden_dim=HIDDEN_DIM)
+        model = simpleLSTM(input_dim=INPUT, hidden_dim=HIDDEN_DIM)
         
         model.to(torch.device(DEVICE))
         optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
         scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=True)
         loss_fnc = SharpeLoss(risk_trgt=.15)
         
+        early_stop_count = 0
+        best_val_loss = float('inf')
         # now iterate though all the epochs
         for epoch in range(EPOCHS):
                 train_loss = train_model(epoch, 
@@ -202,13 +206,22 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                 
         learning_curves.loc[epoch, 'train_loss'] = train_loss
         learning_curves.loc[epoch, 'val_loss'] = val_loss
+        learning_curves.plot()
+        plt.title(f'CV Split: {idx}')
+        plt.savefig(f'learning_curves_{idx}_LSTM.png')
+        plt.clf()
+
+        if val_loss<best_val_loss:
+                best_val_loss = val_loss
+                torch.save(model.state_dict(), model_path)
+                early_stop_count += 0
+        else:
+                early_stop_count +=1
+
+        if early_stop_count == EARLY_STOPPING:
+                print(f'Early Stopping Applied on Epoch: {epoch}')
+                break
                 
-        X_test2 = X_test.copy()
-        X_test2 = scaler.transform(X_test2)
-
-        X_test2 = X_test.copy()
-        X_test2 = retain_pandas_after_scale(X_test2, scaler)
-
         # we need a tuple of the test set start and end dates
         test_start, test_end = X_test.index.get_level_values('date')[0], X_test.index.get_level_values('date')[-1]
         print(f'Test Start :{test_start} | Test End :{test_end}')
@@ -229,12 +242,12 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                             device=DEVICE,
                                             lstm=True,
                                             seq_out=True,
-                                            n_jobs=16)
+                                            n_jobs=8)
                 
                 preds = preds.to_frame('lstm')
                 predictions.append(preds)
 
-        # run back-test
+# run back-test
 preds = pd.concat(predictions).sort_index()
 feats = data.join(preds['lstm'], how='left')
 feats.dropna(subset=['lstm'], inplace=True)

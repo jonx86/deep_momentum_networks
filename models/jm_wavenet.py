@@ -19,7 +19,6 @@ from losses.jm_loss import SharpeLoss, RetLoss
 from collections import OrderedDict
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-
 ############## SET SEED ############## 
 torch.manual_seed(0)
 ######################################
