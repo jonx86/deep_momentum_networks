@@ -20,7 +20,16 @@ import os, glob, sys
 import warnings
 warnings.filterwarnings("ignore")
 
-torch.manual_seed(0)
+############## SET SEED ##############
+def seed_torch(seed=0):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
+seed_torch(0)
 
 ##########################################################
 # Parameters
@@ -127,18 +136,24 @@ def run_train(params):
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_model = copy.deepcopy(model)
             early_stop_count = 0
         else:
             early_stop_count += 1
+
+        global global_val_loss
+        if val_loss < global_val_loss:
+            global_val_loss = val_loss
+            best_model = copy.deepcopy(model)
+            torch.save(best_model, model_path + str(idx) + '.pt')
+            best_model_state = copy.deepcopy(best_model.state_dict())
+            torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
 
         # print(epoch, "Training Loss: %.4f. Validation Loss: %.4f. " % (train_loss, val_loss))
 
         if early_stop_count == early_stopping:
             break
 
-    return best_val_loss, best_model
-    # return best_val_loss, model
+    return best_val_loss
 
 def objective(trial):
 
@@ -156,7 +171,7 @@ def objective(trial):
         'dropout': dropout,
     }
 
-    best_val_loss, best_model = run_train(params)
+    best_val_loss = run_train(params)
     return best_val_loss
 
 def run_hyper_parameter_tuning():
@@ -171,13 +186,20 @@ def run_hyper_parameter_tuning():
 
     return best_params
 
+# bring in the data
 data = load_features()
+
+# create the additional lags shown in the paper
+
 features = [f for f in data.columns if f.startswith('feature')]
+lags = [l for l in data.columns if l.startswith('lag')]
 target = ['target']
-both = features+target
+both = features+target+lags
 
 full = data[both].dropna(subset=both)
+print(full.shape)
 X = full[both]
+features+=lags
 
 for modelname in glob.glob(model_path + "*"):
     print("removed", modelname)
@@ -250,11 +272,14 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                           lstm=False,
                                           return_seq_target=False)
 
+    global_val_loss = float('inf')
     best_params = run_hyper_parameter_tuning()
-    best_val_loss, model = run_train(best_params)
-
-    print('Best Loss: {:.4f}'.format(best_val_loss))
     print('Best Params:', best_params)
+    print('Global Val Loss:', global_val_loss)
+    model = torch.load(model_path + str(idx) + '.pt')
+    model.load_state_dict(torch.load(model_path + str(idx) + '_state_dict.pt'))
+    model.to(gpu)
+
     learning_curves.plot()
     plt.title(f'CV Split: {idx}')
     plt.savefig('images/' + filename + f'_learning_curves_{idx}.png')
@@ -264,23 +289,16 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     print('cv: ', cv_global, file=outfile_best_param)
     print(best_params, file=outfile_best_param, flush=True)
 
-    X_test2 = X_test.copy()
-    X_test2 = scaler.transform(X_test2)
-
-    X_test2 = X_test.copy()
-    X_test2 = retain_pandas_after_scale(X_test2, scaler)
-
     # we need a tuple of the test set start and end dates
     test_start, test_end = X_test.index.get_level_values('date')[0], X_test.index.get_level_values('date')[-1]
     print(f'Test Start :{test_start} | Test End :{test_end}')
 
-    # NOTE get correct test data takes a long time looping through all 72 futures
-    # futures and all over-lapping sequences with in each future
-    # We utilize joblib again to multi-process these batches, looping through sequences within each future
-    # takes ~1.6 minutes on my machine 24-cores
+    # we don't need X train anymore
+    del X_train
+
     xs1 = mpSplits(prep.split_single_future,
-                   (test_start, test_end),
-                   newX, n_jobs=NUM_CORES)
+                   (test_start, test_end), newX,
+                   n_jobs=NUM_CORES)
 
     with torch.no_grad():
         model.eval()
@@ -288,9 +306,9 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         preds = aggregate_seq_preds(model, xs1,
                                     features=features,
                                     device=gpu,
-                                    lstm=True,
-                                    seq_out=True,
-                                    n_jobs=16)
+                                    lstm=False,
+                                    seq_out=False,
+                                    n_jobs=2)
 
         preds = preds.to_frame(model_name)
         predictions.append(preds)
