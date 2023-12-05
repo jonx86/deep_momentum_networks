@@ -229,7 +229,6 @@ class WaveNet(nn.Module):
 data = load_features()
 
 # create the additional lags shown in the paper
-
 features = [f for f in data.columns if f.startswith('feature')]
 lags = [l for l in data.columns if l.startswith('lag')]
 target = ['target']
@@ -240,8 +239,8 @@ print(full.shape)
 X = full[both]
 features+=lags
 
-# NOTE - Please tune, batch size, learning rate, hidden size, dropout, max grad norm
 
+# NOTE - Please tune, batch size, learning rate, hidden size, dropout, max grad norm
 model_path = 'model_WaveNet.pt'
 MODEL_NAME = 'WaveNet'
 IN_CHANNELS = 60

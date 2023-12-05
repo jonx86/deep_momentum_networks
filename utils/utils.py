@@ -660,8 +660,7 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3
 
         data = data.to(torch.device(device))
         target = target.to(torch.device(device))
-        model.eval()
-
+        
         # forward step
         out = model(data)
         out = out.to(torch.device(device))

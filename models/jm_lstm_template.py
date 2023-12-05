@@ -98,8 +98,8 @@ HIDDEN_DIM = 20
 INPUT = 10
 SEC_LEN=63
 DROPOUT_RATE = .30
-BATCH_SIZE = 512
-EPOCHS = 100
+BATCH_SIZE = 256
+EPOCHS = 25
 LEARNING_RATE = 1e-3
 DEVICE = 'cpu'
 NUM_CORES = 8 # -1 for all cores, there are 3 multi-processed data aggregate functions, because we need to operate on the future level
@@ -129,7 +129,6 @@ except Exception:
                 pickle.dump(newX, f)
                 print("dumped file")
         
-
 
 predictions = []
 for idx, (train, test) in enumerate(get_cv_splits(X)):
@@ -176,10 +175,9 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                      device=DEVICE)
 
         model = simpleLSTM(input_dim=INPUT, hidden_dim=HIDDEN_DIM)
-        
         model.to(torch.device(DEVICE))
         optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
-        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=True)
+        #scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=True)
         loss_fnc = SharpeLoss(risk_trgt=.15)
         
         early_stop_count = 0
@@ -201,26 +199,25 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                           loss_fnc=loss_fnc,
                                           device=DEVICE)
                 
-                scheduler.step(val_loss)
-                
-                
-        learning_curves.loc[epoch, 'train_loss'] = train_loss
-        learning_curves.loc[epoch, 'val_loss'] = val_loss
+                #scheduler.step(val_loss)
+                learning_curves.loc[epoch, 'train_loss'] = train_loss
+                learning_curves.loc[epoch, 'val_loss'] = val_loss
+      
+                if val_loss<best_val_loss:
+                        best_val_loss = val_loss
+                        # torch.save(model.state_dict(), model_path)
+                        early_stop_count += 0
+                else:
+                        early_stop_count +=1
+
+                if early_stop_count == EARLY_STOPPING:
+                        print(f'Early Stopping Applied on Epoch: {epoch}')
+                        break
+
         learning_curves.plot()
         plt.title(f'CV Split: {idx}')
         plt.savefig(f'learning_curves_{idx}_LSTM.png')
         plt.clf()
-
-        if val_loss<best_val_loss:
-                best_val_loss = val_loss
-                torch.save(model.state_dict(), model_path)
-                early_stop_count += 0
-        else:
-                early_stop_count +=1
-
-        if early_stop_count == EARLY_STOPPING:
-                print(f'Early Stopping Applied on Epoch: {epoch}')
-                break
                 
         # we need a tuple of the test set start and end dates
         test_start, test_end = X_test.index.get_level_values('date')[0], X_test.index.get_level_values('date')[-1]
@@ -234,6 +231,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                        (test_start, test_end),
                         newX, n_jobs=NUM_CORES)
 
+        # model.load_state_dict(torch.load(model_path))
         with torch.no_grad():
                 model.eval()
                 # feed in sequences for each future and get the predictions, take just the last time-step
@@ -242,7 +240,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                             device=DEVICE,
                                             lstm=True,
                                             seq_out=True,
-                                            n_jobs=8)
+                                            n_jobs=NUM_CORES)
                 
                 preds = preds.to_frame('lstm')
                 predictions.append(preds)
