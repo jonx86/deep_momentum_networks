@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import pandas as pd
-import copy
 import numpy as np
+import copy
 
 from sklearn.preprocessing import RobustScaler
 
@@ -9,20 +9,18 @@ import time
 
 import models as M
 import torch
-import torch.nn as nn
 from torch.optim import Adam
-from torch.utils.data import DataLoader
 import torch.optim.lr_scheduler as lr_scheduler
 
 from losses import jm_loss as L
 from utils.utils import *
+
 import optuna
-import numpy as np
 import os, glob, sys
 import random
 
 import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.filterwarnings("ignore")
 
 ############## SET SEED ##############
 def seed_torch(seed=0):
@@ -39,7 +37,7 @@ seed_torch(0)
 # Parameters
 ##########################################################
 
-# Example: python main_mlp_optuna.py MLP SharpeLoss cuda:0 50
+# Example: python main_lstm_optuna.py simpleLSTM SharpeLoss cuda:0 50 4
 
 model_name = sys.argv[1]
 loss_func_name = sys.argv[2]
@@ -52,12 +50,6 @@ learning_rate_space = [10**-5, 10**-4, 10**-3, 10**-2, 10**-1, 10**0]
 maximum_gradient_norm_space = [10**-4, 10**-3, 10**-2, 10**-1, 10**0, 10**1]
 hidden_size_space = [5, 10, 20, 40, 80]
 dropout_space = [0.1, 0.2, 0.3, 0.4, 0.5]
-
-# batch_size_space = [2048]
-# learning_rate_space = [0.001]
-# maximum_gradient_norm_space = [0.01]
-# hidden_size_space = [20]
-# dropout_space = [0.3]
 
 print(model_name, loss_func_name, gpu, n_trials, n_jobs)
 filename = model_name + "_" + loss_func_name
@@ -74,125 +66,31 @@ cv_global = 0
 
 start_time = time.time()
 
-global global_val_loss
-
-class AverageMeter(object):
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-def load_data_torch(X, y, batch_size=64):
-    X = torch.tensor(X, dtype=torch.float32)
-    y = torch.tensor(y.values, dtype=torch.float32)
-
-    # send to cuda
-    X.to(torch.device(gpu))
-    y.to(torch.device(gpu))
-
-    loader = DataLoader(list(zip(X, y)), shuffle=False, batch_size=batch_size)
-    return loader
-
-
-def validate_model(epoch, model, val_loader, loss_fnc):
-    iter_time = AverageMeter()
-    losses = AverageMeter()
-
-    for idx, (data, target) in enumerate(val_loader):
-        start = time.time()
-
-        if torch.cuda.is_available:
-            data = data.to(torch.device(gpu))
-            target = target.to(torch.device(gpu))
-
-        with torch.no_grad():
-            model.eval()
-            out = model(data)
-            out = out.to(torch.device(gpu))
-            loss = loss_fnc(out, target)
-
-        losses.update(loss.item(), out.shape[0])
-        iter_time.update(time.time() - start)
-
-        # if idx % 10==0:
-        #         print(('Epoch: [{0}][{1}/{2}]\t'
-        #         'Time {iter_time.val:.3f} ({iter_time.avg:.3f})\t'
-        #         'Loss {loss.val:.4f} ({loss.avg:.4f})\t').format(
-        #             epoch,
-        #             idx,
-        #             len(val_loader),
-        #             iter_time=iter_time,
-        #             loss=losses))
-
-    return losses.avg
-
-
-def train_model(epoch, model, train_loader, optimizer, loss_fnc, clip):
-    iter_time = AverageMeter()
-    losses = AverageMeter()
-
-    for idx, (data, target) in enumerate(train_loader):
-        start = time.time()
-
-        if torch.cuda.is_available():
-            data = data.to(torch.device(gpu))
-            target = target.to(torch.device(gpu))
-
-        # forward step
-        model.train()
-        out = model(data)
-        out = out.to(torch.device(gpu))
-        loss = loss_fnc(out, target)
-
-        # gradient descent step
-        optimizer.zero_grad()
-        loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), clip)
-        optimizer.step()
-
-        losses.update(loss.item(), out.shape[0])
-        iter_time.update(time.time() - start)
-
-        # if idx % 10 == 0:
-        #         print(('Epoch: [{0}][{1}/{2}]\t'
-        #         'Time {iter_time.val:.3f} ({iter_time.avg:.3f})\t'
-        #         'Loss {loss.val:.4f} ({loss.avg:.4f})\t').format(
-        #             epoch,
-        #             idx,
-        #             len(train_loader),
-        #             iter_time=iter_time,
-        #             loss=losses))
-    return losses.avg
-
 def run_train(params):
 
     batch_size = params['batch_size']
     epochs = 100
     early_stopping = 25
+    input_dim = 10
     learning_rate = params['learning_rate']
     maximum_gradient_norm = params['maximum_gradient_norm']
 
     model_params = {
-        'input_dim': 10*6,
-        'hidden_size': params['hidden_size'],
-        'dropout': params['dropout'],
-        'device': gpu,
+        'input_dim': input_dim,
+        'hidden_dim': params['hidden_size'],
+        'dropout_rate': params['dropout'],
     }
 
-    # our data-loaders
-    dataloader = load_data_torch(X_train2, y_train2, batch_size=batch_size)
-    valdataloader = load_data_torch(X_val, y_val, batch_size=batch_size)
+    train_loader = load_data_torch(X_train2, y_train2,
+                                   batch_size=batch_size,
+                                   device=gpu)
+
+    val_loader = load_data_torch(X_val, y_val,
+                                 batch_size=batch_size,
+                                 device=gpu)
 
     # model
+    # seed_torch(0)
     model = getattr(M, model_name)
     model = model(**model_params)
     model.to(gpu)
@@ -206,8 +104,20 @@ def run_train(params):
     early_stop_count = 0
     best_val_loss = float('inf')
     for epoch in range(epochs):
-        train_loss = train_model(epoch, model, dataloader, optimizer, loss_func, maximum_gradient_norm)
-        val_loss = validate_model(epoch, model, valdataloader, loss_func)
+        train_loss = train_model(epoch,
+                                 model,
+                                 train_loader=train_loader,
+                                 optimizer=optimizer,
+                                 loss_fnc=loss_func,
+                                 clip_norm=True,
+                                 max_norm=maximum_gradient_norm,
+                                 device=gpu)
+
+        val_loss = validate_model(epoch,
+                                  model,
+                                  val_loader,
+                                  loss_fnc=loss_func,
+                                  device=gpu)
         scheduler.step(val_loss)
 
         learning_curves.loc[epoch, 'train_loss'] = train_loss
@@ -252,6 +162,7 @@ def objective(trial):
 
     best_val_loss = run_train(params)
     return best_val_loss
+
 def run_hyper_parameter_tuning():
     # sampler = optuna.samplers.TPESampler(seed=42)
     sampler = optuna.samplers.RandomSampler(seed=0)
@@ -264,30 +175,47 @@ def run_hyper_parameter_tuning():
 
     return best_params
 
-# Dataset
-dataset = load_features()
-dataset.dropna(inplace=True)
-
-# Future IDs
-futures = dataset.index.get_level_values('future').unique().tolist()
-
-# Inputs and Targets
-features = [column for column in dataset.columns if column.startswith('feature')]
-lags = [column for column in dataset.columns if column.startswith('lag')]
-features = features + lags
+data = load_features()
+features = [f for f in data.columns if f.startswith('feature')]
 target = ['target']
+both = features+target
 
-# Workingset
-X = dataset[features + target]
+full = data[both].dropna(subset=both)
+X = full[both]
 
 for modelname in glob.glob(model_path + "*"):
     print("removed", modelname)
     os.remove(modelname)
 
-predictions = [0] * 6
-train_history_all = []
-valid_history_all = []
-# now start the loop
+NUM_CORES = -1  # -1 for all cores, there are 3 multi-processed data aggregate functions, because we need to operate on the future level
+
+# used for getting the correct batching of the test set to feed into LSTM
+prep = PrePTestSeqData(X)
+
+# TODO split Xy for seq could to be multi-processed for now this is slow but works - Use joblib
+# My method to process the entire dataset first so I can filter on correct dates for test set and
+# don't need to look back a small window into train set
+
+SEC_LEN = 63
+FILENAME = f"xs_{SEC_LEN}.pickle"  # incase we want to test different sequence lenghts
+
+try:
+    with open(FILENAME, "rb") as f:
+        print('loading pickle .....')
+        start = time.time()
+        newX = pickle.load(f)
+        print(f"Loading pickle took: {time.time() - start}")
+except Exception:
+    newX, _ = split_Xy_for_seq(X[features], X['target'],
+                               step_size=SEC_LEN,
+                               return_seq_target=True,
+                               lstm=True)
+
+    with open(FILENAME, "wb") as f:
+        pickle.dump(newX, f)
+        print("dumped file")
+
+predictions = []
 for idx, (train, test) in enumerate(get_cv_splits(X)):
     print("cv run:", idx)
     learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
@@ -301,13 +229,28 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     # validation split
     X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
 
+    # scale the data
     scaler = RobustScaler()
+    scaler.fit(X_train2)
 
-    # we only scale the 90% train X , so we don't learn the mean and sigma of the validation set
-    X_train2 = scaler.fit_transform(X_train2)
+    # We want to fit only on the 90% xVal
+    X_train2 = retain_pandas_after_scale(X_train2, scaler=scaler)
+    X_val = retain_pandas_after_scale(X_val, scaler=scaler)
 
-    # now scaler X_train2 and Xval
-    X_val = scaler.transform(X_val)
+    # this function
+    X_val, y_val = split_Xy_for_seq(X_train=X_val,
+                                    y_train=y_val,
+                                    step_size=SEC_LEN,
+                                    return_pandas=False,
+                                    lstm=True,
+                                    return_seq_target=True)
+
+    X_train2, y_train2 = split_Xy_for_seq(X_train=X_train2,
+                                          y_train=y_train2,
+                                          step_size=SEC_LEN,
+                                          return_pandas=False,
+                                          lstm=True,
+                                          return_seq_target=True)
 
     global_val_loss = float('inf')
     best_params = run_hyper_parameter_tuning()
@@ -326,46 +269,55 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     print('cv: ', cv_global, file=outfile_best_param)
     print(best_params, file=outfile_best_param, flush=True)
 
-    # scale
     X_test2 = X_test.copy()
     X_test2 = scaler.transform(X_test2)
 
-    X_test2 = torch.tensor(X_test2, dtype=torch.float32)
-    X_test2 = X_test2.to(torch.device(gpu))
+    X_test2 = X_test.copy()
+    X_test2 = retain_pandas_after_scale(X_test2, scaler)
+
+    # we need a tuple of the test set start and end dates
+    test_start, test_end = X_test.index.get_level_values('date')[0], X_test.index.get_level_values('date')[-1]
+    print(f'Test Start :{test_start} | Test End :{test_end}')
+
+    # NOTE get correct test data takes a long time looping through all 72 futures
+    # futures and all over-lapping sequences with in each future
+    # We utilize joblib again to multi-process these batches, looping through sequences within each future
+    # takes ~1.6 minutes on my machine 24-cores
+    xs1 = mpSplits(prep.split_single_future,
+                   (test_start, test_end),
+                   newX, n_jobs=NUM_CORES)
 
     with torch.no_grad():
         model.eval()
-        preds = model(X_test2)
-        preds = preds.cpu().detach().numpy()
-        preds=preds.reshape(preds.shape[0], )
-        if loss_func_name == 'RegressionLoss':
-            preds = np.sign(preds)
-        if loss_func_name == 'BinaryClassificationLoss':
-            preds -= .50
-            preds = np.sign(preds)
-        preds = pd.Series(data=preds, index=y_test.index)
-        predictions[idx] = preds
+        # feed in sequences for each future and get the predictions, take just the last time-step
+        preds = aggregate_seq_preds(model, xs1,
+                                    features=features,
+                                    device=gpu,
+                                    lstm=True,
+                                    seq_out=True,
+                                    n_jobs=2)
+
+        preds = preds.to_frame(model_name)
+        predictions.append(preds)
 
     cv_global += 1
     preds=pd.concat([predictions[idx]]).sort_index()
-    preds = preds.to_frame('mlp')
-    new_dataset = dataset.copy()
-    feats = new_dataset.join(preds[['mlp']], how='left')
-    feats.dropna(subset=['mlp'], inplace=True)
+    new_dataset = data.copy()
+    feats = new_dataset.join(preds[[model_name]], how='left')
+    feats.dropna(subset=[model_name], inplace=True)
     dates = feats.index.get_level_values('date').unique().to_list()
-    strat_rets = process_jobs(dates, feats, signal_col='mlp')
-    values = get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench'))
+    strat_rets = process_jobs(dates, feats, signal_col=model_name)
+    values = get_returns_breakout(strat_rets.fillna(0.0).to_frame(model_name + '_bench'))
     print('idx: ', idx, file=outfile)
     print(values, file=outfile, flush=True)
     print(values)
 
 preds=pd.concat(predictions).sort_index()
-preds = preds.to_frame('mlp')
-feats = dataset.join(preds[['mlp']], how='left')
-feats.dropna(subset=['mlp'], inplace=True)
+feats = data.join(preds[[model_name]], how='left')
+feats.dropna(subset=[model_name], inplace=True)
 dates = feats.index.get_level_values('date').unique().to_list()
-strat_rets = process_jobs(dates, feats, signal_col='mlp')
-ret_breakout = get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench'))
+strat_rets = process_jobs(dates, feats, signal_col=model_name)
+ret_breakout = get_returns_breakout(strat_rets.fillna(0.0).to_frame(model_name + '_bench'))
 print(ret_breakout)
 print('Final', file=outfile, flush=True)
 print(ret_breakout, file=outfile, flush=True)
@@ -378,4 +330,4 @@ strat_rets.to_pickle("results/strat_rets_" + filename + ".pkl")
 ax = strat_rets.fillna(0.).cumsum().plot()
 ax.figure.savefig('images/' + filename + '_timeline.png')
 
-print("time:", (time.time() - start_time) / 60)
+print("total time:", (time.time() - start_time) / 60)

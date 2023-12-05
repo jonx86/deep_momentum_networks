@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 import copy
+import numpy as np
 
 from sklearn.preprocessing import RobustScaler
 
@@ -11,17 +12,28 @@ import torch
 import torch.nn as nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
+import torch.optim.lr_scheduler as lr_scheduler
 
 from losses import jm_loss as L
-from utils.utils import load_features, get_cv_splits, train_val_split, process_jobs, get_returns_breakout
+from utils.utils import *
 import optuna
 import numpy as np
 import os, glob, sys
+import random
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-torch.manual_seed(0)
+############## SET SEED ##############
+def seed_torch(seed=0):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
+seed_torch(0)
 
 ##########################################################
 # Parameters
@@ -33,13 +45,15 @@ model_name = sys.argv[1]
 loss_func_name = sys.argv[2]
 gpu = sys.argv[3]
 n_trials = int(sys.argv[4])
+n_jobs = int(sys.argv[5])
 
 batch_size_space = [256, 512, 1024, 2048]
 learning_rate_space = [10**-5, 10**-4, 10**-3, 10**-2, 10**-1, 10**0]
 maximum_gradient_norm_space = [10**-4, 10**-3, 10**-2, 10**-1, 10**0, 10**1]
 reg_space = [10**-5, 10**-4, 10**-3, 10**-2, 10**-1]
+weight_space = [0.6, 0.55, 0.5, 0.45, 0.4]
 
-print(model_name, loss_func_name, gpu, n_trials)
+print(model_name, loss_func_name, gpu, n_trials, n_jobs)
 filename = model_name + "_" + loss_func_name
 outfile = open("results/" + filename + ".txt", "w")
 outfile_best_param = open("results/best_params_" + filename + ".txt", "w")
@@ -53,6 +67,7 @@ cv_global = 0
 ##########################################################
 
 start_time = time.time()
+
 class AverageMeter(object):
     def __init__(self):
         self.reset()
@@ -175,30 +190,43 @@ def run_train(params):
     # print(model)
 
     optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=reg)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=False)
+    loss_func = getattr(L, loss_func_name)
+    if loss_func_name == "SharpeLossCustom":
+        loss_func = loss_func(params['weight'])
+    else:
+        loss_func = loss_func()
 
     early_stop_count = 0
     best_val_loss = float('inf')
     for epoch in range(epochs):
         train_loss = train_model(epoch, model, dataloader, optimizer, loss_func, maximum_gradient_norm)
         val_loss = validate_model(epoch, model, valdataloader, loss_func)
+        scheduler.step(val_loss)
 
         learning_curves.loc[epoch, 'train_loss'] = train_loss
         learning_curves.loc[epoch, 'val_loss'] = val_loss
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            # best_model = copy.deepcopy(model)
             early_stop_count = 0
         else:
             early_stop_count += 1
+
+        global global_val_loss
+        if val_loss < global_val_loss:
+            global_val_loss = val_loss
+            best_model = copy.deepcopy(model)
+            torch.save(best_model, model_path + str(idx) + '.pt')
+            best_model_state = copy.deepcopy(best_model.state_dict())
+            torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
 
         # print(epoch, "Training Loss: %.4f. Validation Loss: %.4f. " % (train_loss, val_loss))
 
         if early_stop_count == early_stopping:
             break
 
-    # return best_val_loss, best_model
-    return best_val_loss, model
+    return best_val_loss
 
 def objective(trial):
 
@@ -206,6 +234,7 @@ def objective(trial):
     learning_rate = trial.suggest_categorical('learning_rate', learning_rate_space)
     maximum_gradient_norm = trial.suggest_categorical('maximum_gradient_norm', maximum_gradient_norm_space)
     reg = trial.suggest_categorical('reg', reg_space)
+    weight = trial.suggest_categorical('weight', weight_space)
 
     params = {
         'batch_size': batch_size,
@@ -214,23 +243,22 @@ def objective(trial):
         'reg': reg,
     }
 
-    best_val_loss, best_model = run_train(params)
+    if loss_func_name == "SharpeLossCustom":
+        params['weight'] = weight
+
+    best_val_loss = run_train(params)
     return best_val_loss
 def run_hyper_parameter_tuning():
-    sampler = optuna.samplers.TPESampler(seed=42)
-    # sampler = optuna.samplers.RandomSampler(seed=0)
+    # sampler = optuna.samplers.TPESampler(seed=42)
+    sampler = optuna.samplers.RandomSampler(seed=0)
     study = optuna.create_study(sampler=sampler)
-    study.optimize(objective, n_trials=n_trials, n_jobs=n_trials, show_progress_bar=True)
+    study.optimize(objective, n_trials=n_trials, n_jobs=n_jobs, show_progress_bar=True)
 
     best_params = study.best_params
 
     print("Best Parameters:", best_params)
 
     return best_params
-
-loss_func = getattr(L, loss_func_name)
-loss_func = loss_func()
-print(loss_func)
 
 # Dataset
 dataset = load_features()
@@ -247,8 +275,6 @@ target = ['target']
 
 # Workingset
 X = dataset[features + target]
-
-device = torch.device('cuda')
 
 for modelname in glob.glob(model_path + "*"):
     print("removed", modelname)
@@ -272,17 +298,21 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
 
     scaler = RobustScaler()
-    X_train = scaler.fit_transform(X_train)
+
+    # we only scale the 90% train X , so we don't learn the mean and sigma of the validation set
+    X_train2 = scaler.fit_transform(X_train2)
 
     # now scaler X_train2 and Xval
-    X_train2 = scaler.transform(X_train2)
     X_val = scaler.transform(X_val)
 
+    global_val_loss = float('inf')
     best_params = run_hyper_parameter_tuning()
-    best_val_loss, best_model = run_train(best_params)
-
-    print('Best Loss: {:.4f}'.format(best_val_loss))
     print('Best Params:', best_params)
+    print('Global Val Loss:', global_val_loss)
+    model = torch.load(model_path + str(idx) + '.pt')
+    model.load_state_dict(torch.load(model_path + str(idx) + '_state_dict.pt'))
+    model.to(gpu)
+
     learning_curves.plot()
     plt.title(f'CV Split: {idx}')
     plt.savefig('images/' + filename + f'_learning_curves_{idx}.png')
@@ -300,8 +330,8 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     X_test2 = X_test2.to(torch.device(gpu))
 
     with torch.no_grad():
-        best_model.eval()
-        preds = best_model(X_test2)
+        model.eval()
+        preds = model(X_test2)
         preds = preds.cpu().detach().numpy()
         preds=preds.reshape(preds.shape[0], )
         if loss_func_name == 'RegressionLoss':
@@ -338,6 +368,8 @@ print(ret_breakout, file=outfile, flush=True)
 
 outfile.close()
 outfile_best_param.close()
+
+strat_rets.to_pickle("results/strat_rets_" + filename + ".pkl")
 
 ax = strat_rets.fillna(0.).cumsum().plot()
 ax.figure.savefig('images/' + filename + '_timeline.png')
