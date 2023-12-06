@@ -2,6 +2,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import copy
 import numpy as np
+from datetime import datetime
+from pytz import timezone
+import pytz
 
 from sklearn.preprocessing import RobustScaler
 
@@ -46,6 +49,7 @@ loss_func_name = sys.argv[2]
 gpu = sys.argv[3]
 n_trials = int(sys.argv[4])
 n_jobs = int(sys.argv[5])
+max_epochs = int(sys.argv[6])
 
 batch_size_space = [256, 512, 1024, 2048]
 learning_rate_space = [10**-5, 10**-4, 10**-3, 10**-2, 10**-1, 10**0]
@@ -53,15 +57,33 @@ maximum_gradient_norm_space = [10**-4, 10**-3, 10**-2, 10**-1, 10**0, 10**1]
 reg_space = [10**-5, 10**-4, 10**-3, 10**-2, 10**-1]
 weight_space = [0.6, 0.55, 0.5, 0.45, 0.4]
 
-print(model_name, loss_func_name, gpu, n_trials, n_jobs)
+print(model_name, loss_func_name, gpu, n_trials, n_jobs, max_epochs)
+
+##########################################################
+# Create directory to store data
+##########################################################
 filename = model_name + "_" + loss_func_name
-outfile = open("results/" + filename + ".txt", "w")
-outfile_best_param = open("results/best_params_" + filename + ".txt", "w")
+
+now = datetime.now(tz=pytz.utc)
+now = now.astimezone(timezone('US/Pacific'))
+data_str = now.strftime("%m%d") + "_" + now.strftime('%H%M%S')
+loc_results = "files/" + filename + "_" + data_str + "/"
+loc_weights = "files/" + filename + "_" + data_str + "/"
+loc_images = "files/" + filename + "_" + data_str + "/"
+if not os.path.exists(loc_results):
+    os.makedirs(loc_results)
+if not os.path.exists(loc_weights):
+    os.makedirs(loc_weights)
+if not os.path.exists(loc_images):
+    os.makedirs(loc_images)
+
+outfile = open(loc_results + filename + ".txt", "w")
+outfile_best_param = open(loc_results + "best_params_" + filename + ".txt", "w")
 model_name = model_name + loss_func_name
 
-# Parameters
-model_path = 'model_weights/' + filename + '_model_'
+model_path = loc_weights + filename + '_model_'
 cv_global = 0
+
 ##########################################################
 # Training
 ##########################################################
@@ -168,7 +190,7 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, clip):
 def run_train(params):
 
     batch_size = params['batch_size']
-    epochs = 100
+    epochs = max_epochs
     early_stopping = 25
     learning_rate = params['learning_rate']
     maximum_gradient_norm = params['maximum_gradient_norm']
@@ -199,6 +221,7 @@ def run_train(params):
 
     early_stop_count = 0
     best_val_loss = float('inf')
+    learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
     for epoch in range(epochs):
         train_loss = train_model(epoch, model, dataloader, optimizer, loss_func, maximum_gradient_norm)
         val_loss = validate_model(epoch, model, valdataloader, loss_func)
@@ -214,12 +237,14 @@ def run_train(params):
             early_stop_count += 1
 
         global global_val_loss
+        global learning_curves_global
         if val_loss < global_val_loss:
             global_val_loss = val_loss
             best_model = copy.deepcopy(model)
             torch.save(best_model, model_path + str(idx) + '.pt')
             best_model_state = copy.deepcopy(best_model.state_dict())
             torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
+            learning_curves_global = learning_curves
 
         # print(epoch, "Training Loss: %.4f. Validation Loss: %.4f. " % (train_loss, val_loss))
 
@@ -234,7 +259,6 @@ def objective(trial):
     learning_rate = trial.suggest_categorical('learning_rate', learning_rate_space)
     maximum_gradient_norm = trial.suggest_categorical('maximum_gradient_norm', maximum_gradient_norm_space)
     reg = trial.suggest_categorical('reg', reg_space)
-    weight = trial.suggest_categorical('weight', weight_space)
 
     params = {
         'batch_size': batch_size,
@@ -244,6 +268,7 @@ def objective(trial):
     }
 
     if loss_func_name == "SharpeLossCustom":
+        weight = trial.suggest_categorical('weight', weight_space)
         params['weight'] = weight
 
     best_val_loss = run_train(params)
@@ -286,7 +311,7 @@ valid_history_all = []
 # now start the loop
 for idx, (train, test) in enumerate(get_cv_splits(X)):
     print("cv run:", idx)
-    learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
+    learning_curves_global = pd.DataFrame(columns=['train_loss', 'val_loss'])
     iter_time = AverageMeter()
     train_losses = AverageMeter()
 
@@ -313,9 +338,9 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     model.load_state_dict(torch.load(model_path + str(idx) + '_state_dict.pt'))
     model.to(gpu)
 
-    learning_curves.plot()
+    learning_curves_global.plot()
     plt.title(f'CV Split: {idx}')
-    plt.savefig('images/' + filename + f'_learning_curves_{idx}.png')
+    plt.savefig(loc_images + filename + f'_learning_curves_{idx}.png')
     plt.clf()
 
     # export the best parameters
@@ -374,4 +399,5 @@ strat_rets.to_pickle("results/strat_rets_" + filename + ".pkl")
 ax = strat_rets.fillna(0.).cumsum().plot()
 ax.figure.savefig('images/' + filename + '_timeline.png')
 
+print(data_str)
 print("time:", (time.time() - start_time) / 60)
