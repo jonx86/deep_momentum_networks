@@ -3,13 +3,14 @@ import torch.nn as nn
 
 
 class TransformerEncoder(nn.Module):
-    def __init__(self, input_size, hidden_size, maximum_length, number_of_heads=4, number_of_encoder_layers=1, dropout=0.0, device=None):
+    def __init__(self, input_size, hidden_size, maximum_length, number_of_heads=4, number_of_encoder_layers=1, feedforward_size=100, dropout=0.0, device=None):
         super(TransformerEncoder, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.maximum_length = maximum_length
         self.number_of_heads = number_of_heads
         self.number_of_encoder_layers = number_of_encoder_layers
+        self.feedforward_size = feedforward_size
         self.dropout = dropout
         self.device = device
 
@@ -23,7 +24,7 @@ class TransformerEncoder(nn.Module):
         encoding[:, 1::2] = torch.cos(position / denominator)
         self.register_buffer("encoding", encoding[None, :, :])
 
-        transformer_encoder_layer = nn.TransformerEncoderLayer(self.hidden_size, self.number_of_heads, dropout=dropout, batch_first=True, device=device)
+        transformer_encoder_layer = nn.TransformerEncoderLayer(self.hidden_size, self.number_of_heads, dim_feedforward=self.feedforward_size, dropout=dropout, batch_first=True, device=device)
         self.transformer = torch.nn.TransformerEncoder(transformer_encoder_layer, self.number_of_encoder_layers, mask_check=True)
 
         self.linear = nn.Linear(self.hidden_size, 1, device=self.device)
