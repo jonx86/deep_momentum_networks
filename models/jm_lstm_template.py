@@ -20,6 +20,9 @@ from models.ryan_transformer import Transformer
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import time
+from sklearn.model_selection import ParameterSampler
+
+from models.ryan_transformer_encoder import TransformerEncoder
 
 ############## SET SEED ############## 
 torch.manual_seed(0)
@@ -91,15 +94,16 @@ class FullLSTM(nn.Module):
                 outputs = self.fcBlock(outputs)
                 return outputs
 
+
 # early stopping
 EARLY_STOPPING = 25
-model_path = 'lstm.pt'
-HIDDEN_DIM = 20
+model_path = 'transformer_encode.pt'
+HIDDEN_DIM = 40
 INPUT = 10
 SEC_LEN=63
 DROPOUT_RATE = .30
 BATCH_SIZE = 256
-EPOCHS = 25
+EPOCHS = 100
 LEARNING_RATE = 1e-3
 DEVICE = 'cpu'
 NUM_CORES = 8 # -1 for all cores, there are 3 multi-processed data aggregate functions, because we need to operate on the future level
@@ -175,9 +179,10 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                      device=DEVICE)
 
         model = simpleLSTM(input_dim=INPUT, hidden_dim=HIDDEN_DIM)
+        
         model.to(torch.device(DEVICE))
         optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
-        #scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=True)
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=True)
         loss_fnc = SharpeLoss(risk_trgt=.15)
         
         early_stop_count = 0
@@ -199,13 +204,13 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                           loss_fnc=loss_fnc,
                                           device=DEVICE)
                 
-                #scheduler.step(val_loss)
+                scheduler.step(val_loss)
                 learning_curves.loc[epoch, 'train_loss'] = train_loss
                 learning_curves.loc[epoch, 'val_loss'] = val_loss
       
                 if val_loss<best_val_loss:
                         best_val_loss = val_loss
-                        # torch.save(model.state_dict(), model_path)
+                        torch.save(model.state_dict(), model_path)
                         early_stop_count += 0
                 else:
                         early_stop_count +=1
@@ -231,7 +236,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                        (test_start, test_end),
                         newX, n_jobs=NUM_CORES)
 
-        # model.load_state_dict(torch.load(model_path))
+        model.load_state_dict(torch.load(model_path))
         with torch.no_grad():
                 model.eval()
                 # feed in sequences for each future and get the predictions, take just the last time-step
@@ -245,14 +250,16 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                 preds = preds.to_frame('lstm')
                 predictions.append(preds)
 
-# run back-test
-preds = pd.concat(predictions).sort_index()
-feats = data.join(preds['lstm'], how='left')
-feats.dropna(subset=['lstm'], inplace=True)
-dates = feats.index.get_level_values('date').unique().to_list()
-strat_rets = process_jobs(dates, feats, signal_col='lstm')
-bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
-print(bt)
+        # run back-test
+        preds = pd.concat(predictions).sort_index()
+        feats = data.join(preds['lstm'], how='left')
+        feats.dropna(subset=['lstm'], inplace=True)
+        dates = feats.index.get_level_values('date').unique().to_list()
+        strat_rets = process_jobs(dates, feats, signal_col='lstm')
+        bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
+        print(bt)
+        break
+
       
                 
 

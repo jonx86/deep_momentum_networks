@@ -90,9 +90,9 @@ def get_ret_single_date(data:pd.DataFrame, date:str, signal_col:str, fwd_ret_col
         return out
 
 
-def process_jobs(dates, data, signal_col, n_jobs=-1):
+def process_jobs(dates, data, signal_col, n_jobs=10, prefer=None):
     # NOTE with roughly 8k daily observations this takes 20 minutes on cores=24 for a single strategy back-test
-    results = Parallel(n_jobs=n_jobs, verbose=True)(delayed(get_ret_single_date)(data, date, signal_col) for date in dates)
+    results = Parallel(n_jobs=n_jobs, prefer=prefer, verbose=True)(delayed(get_ret_single_date)(data, date, signal_col) for date in dates)
     return pd.concat(results, axis=0).sort_index()
 
 
@@ -429,10 +429,10 @@ def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:boo
     return out
 
 
-def aggregate_seq_preds(model, X_test:list, features:list, lstm=True, seq_out=True, device='cpu', n_jobs=-1):
+def aggregate_seq_preds(model, X_test:list, features:list, lstm=True, seq_out=True, device='cpu', n_jobs=-1, prefer=None):
     # return predictions
      # NOTE with roughly 8k daily observations this takes 20 minutes on cores=24 for a single strategy back-test
-    results = Parallel(n_jobs=n_jobs, verbose=True)(delayed(get_seq_test_preds)(model, x,
+    results = Parallel(n_jobs=n_jobs, prefer=prefer, verbose=True)(delayed(get_seq_test_preds)(model, x,
                                                                                features, lstm,
                                                                                seq_out,
                                                                                device) for x in X_test)
@@ -580,8 +580,8 @@ class PrePTestSeqData():
         return out
 
 
-def mpSplits(func, cv_split:tuple, list_of_features_sequences:list, n_jobs=-1):
-    results = Parallel(n_jobs=n_jobs, verbose=True)(delayed(func)(cv_split, x) for x in list_of_features_sequences)
+def mpSplits(func, cv_split:tuple, list_of_features_sequences:list, n_jobs=-1, prefer=None):
+    results = Parallel(n_jobs=n_jobs, verbose=True, prefer=prefer)(delayed(func)(cv_split, x) for x in list_of_features_sequences)
     return results
 
 

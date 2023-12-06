@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 from losses.jm_loss import SharpeLoss, RetLoss
 from collections import OrderedDict
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from joblib.externals.loky import get_reusable_executor
+import gc
 
 ############## SET SEED ############## 
 torch.manual_seed(0)
@@ -82,39 +84,57 @@ class ResBlock(nn.Module):
       
 
 class ResStack(nn.Module):
-      def __init__(self, layers:list, stacks, in_channels, out_channels, kernel_size, device):
-            super(ResStack, self).__init__()
-            self.layers = layers
-            self.stacks = stacks
-            self.in_channels = in_channels
-            self.out_channels = out_channels
-            self.kernel_size = kernel_size
+       
+       def __init__(self, in_channels, out_channels, kernel_size, device):
+              super(ResStack, self).__init__()
+              self.in_channels=in_channels
+              self.out_channels=out_channels
+              self.kernel_size = kernel_size
+              self.device = device
 
-            # save all the stacks
-            self.stack_list = []
+              # the paper mentions dialiation rates of 5, 10, 15, 21, 42 as layers of the residual block
+              self.cnnFiveDilation = ResBlock(in_channels=self.in_channels,
+                                              out_channels=self.out_channels,
+                                              kernel_size=2, dilation=5,
+                                              device=self.device)
+              
+              self.cnn10Dilation = ResBlock(in_channels=self.in_channels,
+                                              out_channels=self.out_channels,
+                                              kernel_size=2, dilation=10,
+                                              device=self.device)
+              
+              self.cnn15Dilation = ResBlock(in_channels=self.in_channels,
+                                              out_channels=self.out_channels,
+                                              kernel_size=2, dilation=15,
+                                              device=self.device)
+              
+              self.cnn21Dilation = ResBlock(in_channels=self.in_channels,
+                                              out_channels=self.out_channels,
+                                              kernel_size=2, dilation=21,
+                                              device=self.device)
+              
+              self.cnn42Dilation = ResBlock(in_channels=self.in_channels,
+                                              out_channels=self.out_channels,
+                                              kernel_size=2, dilation=42,
+                                              device=self.device)
+              
+             
+              
+       def forward(self, inputs):
+              # iterate through the residual stack
+              residual_connection, skip_connection1 = self.cnnFiveDilation(inputs)
+              residual_connection, skip_connection2 = self.cnn10Dilation(residual_connection)
+              residual_connection, skip_connection3 = self.cnn15Dilation(residual_connection)
+              residual_connection, skip_connection4 = self.cnn21Dilation(residual_connection)
+              residual_connection, skip_connection5 = self.cnn42Dilation(residual_connection)
 
-            # loop through stacks and layers
-            for _ in range(self.stacks):
-                  single_stack = []
-                  for dilation in layers:
-                        r = ResBlock(in_channels=self.in_channels,
-                                     out_channels=self.out_channels,
-                                     kernel_size=kernel_size,
-                                     dilation=dilation, device=device)
-                        single_stack.append(r)
-                  self.stack_list.append(single_stack)
-      
-      def forward(self, inputs):
-            skips = []
-            residual= inputs
-            for stack in self.stack_list:
-                  for layer in stack:
-                        residual, skip = layer(residual)
-                        skips.append(skip)
+              skips = torch.stack((skip_connection1,
+                                   skip_connection2,
+                                   skip_connection3,
+                                   skip_connection4,
+                                   skip_connection5))
+              return skips
 
-            # skips?
-            skips = torch.stack(skips)
-            return skips
 
 
 class FullyConnectedBlock(nn.Module):
@@ -136,51 +156,49 @@ class FullyConnectedBlock(nn.Module):
             return outputs
       
 
-class FullyConnectedBlock1L(nn.Module):
-      def __init__(self, out_dim=1):
-            super(FullyConnectedBlock1L, self).__init__()
-            self.out_dim=out_dim
-            self.seq = nn.Sequential(
-                  nn.LazyLinear(self.out_dim),
-                  nn.Tanh())
+# class FullyConnectedBlock1L(nn.Module):
+#       def __init__(self, out_dim=1):
+#             super(FullyConnectedBlock1L, self).__init__()
+#             self.out_dim=out_dim
+#             self.seq = nn.Sequential(
+#                   nn.LazyLinear(self.out_dim),
+#                   nn.Tanh())
             
-      def forward(self, inputs):
-            outputs = self.seq(inputs)
-            return outputs
+#       def forward(self, inputs):
+#             outputs = self.seq(inputs)
+#             return outputs
       
 
-class OnebyOneBlock(nn.Module):
-       def __init__(self, kernel, in_channels, out_channels, out_dim=1):
-            super(OnebyOneBlock, self).__init__()
-            self.kernel=kernel
-            self.in_channels=in_channels
-            self.out_channels=out_channels
-            self.out_dim=out_dim
+# class OnebyOneBlock(nn.Module):
+#        def __init__(self, kernel, in_channels, out_channels, out_dim=1):
+#             super(OnebyOneBlock, self).__init__()
+#             self.kernel=kernel
+#             self.in_channels=in_channels
+#             self.out_channels=out_channels
+#             self.out_dim=out_dim
 
-            self.seq = nn.Sequential(
-                   nn.Conv1d(in_channels=self.in_channels,
-                             out_channels=self.out_channels,
-                             kernel_size=1),
-                   nn.Tanh(),
-                   nn.Conv1d(in_channels=self.out_channels,
-                             out_channels=out_dim,
-                             kernel_size=1),
-                   nn.Tanh())
+#             self.seq = nn.Sequential(
+#                    nn.Conv1d(in_channels=self.in_channels,
+#                              out_channels=self.out_channels,
+#                              kernel_size=1),
+#                    nn.Tanh(),
+#                    nn.Conv1d(in_channels=self.out_channels,
+#                              out_channels=out_dim,
+#                              kernel_size=1),
+#                    nn.Tanh())
       
-       def forward(self, inputs):
-              outputs = self.seq(inputs)
-              return outputs.squeeze(1)[:, -1]
+#        def forward(self, inputs):
+#               outputs = self.seq(inputs)
+#               return outputs.squeeze(1)[:, -1]
        
 
 class WaveNet(nn.Module):
 
-      def __init__(self, in_channels, out_channels, kernal_size, num_layers, num_stacks, hidden_size, dropOutRate=.30, device='cuda'):
+      def __init__(self, in_channels, out_channels, kernal_size, hidden_size, dropOutRate=.30, device='cuda'):
             super(WaveNet, self).__init__()
             self.in_channels = in_channels
             self.out_channels = out_channels
             self.kernal_size = kernal_size
-            self.num_layers = num_layers
-            self.num_stacks = num_stacks
             self.hidden_size = hidden_size
             self.dropOutRate = dropOutRate
             self.device = device
@@ -191,12 +209,9 @@ class WaveNet(nn.Module):
                                                 kernel_size=self.kernal_size,
                                                 dilation=1, device=self.device)
             
-            self.ResStacks = ResStack(layers=self.num_layers,
-                                      stacks=self.num_stacks,
-                                      in_channels=self.out_channels,
-                                      kernel_size=self.kernal_size,
+            self.ResStacks = ResStack(in_channels=self.out_channels,
                                       out_channels=self.out_channels,
-                                      device=self.device)
+                                      kernel_size=2, device=device)
             
             self.tanh1 = nn.Tanh()
            
@@ -223,7 +238,10 @@ class WaveNet(nn.Module):
             skip_connections = self.flattener(skip_connections)
             skip_connections = self.fcBlock(skip_connections)
             return skip_connections
-            
+
+
+
+
 
 # bring in the data
 data = load_features()
@@ -244,11 +262,11 @@ features+=lags
 model_path = 'model_WaveNet.pt'
 MODEL_NAME = 'WaveNet'
 IN_CHANNELS = 60
-HIDDEN_DIM = 40
-OUT_CHANNELS = 3
+HIDDEN_DIM = 20
+OUT_CHANNELS = 10
 SEC_LEN=63
-DROPOUT_RATE = .50
-BATCH_SIZE = 512
+DROPOUT_RATE = .30
+BATCH_SIZE = 1024
 EPOCHS = 100
 LEARNING_RATE = 1e-3
 DEVICE = 'cuda'
@@ -257,7 +275,6 @@ EARLY_STOPPING = 25
 KERNEL_SIZE = 2
 
 prep = PrePTestSeqData(X)
-
 # TODO split Xy for seq could to be multi-processed for now this is slow but works - Use joblib
 # My method to process the entire dataset first so I can filter on correct dates for test set and
 # don't need to look back a small window into train set
@@ -283,6 +300,9 @@ except Exception:
 
 predictions = []
 for idx, (train, test) in enumerate(get_cv_splits(X)):
+       print(torch.cuda.memory_allocated())
+       print(torch.cuda.max_memory_allocated())
+
        learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
        iter_time = AverageMeter()
        train_losses = AverageMeter()
@@ -325,14 +345,18 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                     batch_size=BATCH_SIZE,
                                     device=DEVICE)
        
-       dilations = [5, 10, 15, 21, 42]
-       model = WaveNet(in_channels=IN_CHANNELS, out_channels=OUT_CHANNELS, kernal_size=KERNEL_SIZE,
-                       num_layers=dilations, num_stacks=1, hidden_size=HIDDEN_DIM,
+       model = WaveNet(in_channels=IN_CHANNELS,
+                       out_channels=OUT_CHANNELS,
+                       kernal_size=KERNEL_SIZE,
+                      hidden_size=HIDDEN_DIM,
                        dropOutRate=DROPOUT_RATE)
        
        model.to(torch.device(DEVICE))
-       optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
-       scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=True)
+       optimizer = Adam(model.parameters(),
+                        lr=LEARNING_RATE)
+       scheduler = ReduceLROnPlateau(optimizer, mode='min',
+                                     factor=.5,
+                                     verbose=True)
        loss_fnc = SharpeLoss(risk_trgt=.15)
 
        early_stop_count = 0
@@ -384,8 +408,12 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
        del X_train
 
        xs1 = mpSplits(prep.split_single_future,
-                     (test_start, test_end), newX,
+                     (test_start, test_end),
+                     newX,
+                     prefer=None,
                      n_jobs=NUM_CORES)
+       
+       get_reusable_executor().shutdown(wait=True)
        
        model.load_state_dict(torch.load(model_path))
        with torch.no_grad():
@@ -396,19 +424,27 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                             device=DEVICE,
                                             lstm=False,
                                             seq_out=False,
+                                            prefer=None,
                                             n_jobs=NUM_CORES)
+                
+                get_reusable_executor().shutdown(wait=True)
                 
                 preds = preds.to_frame('WaveNet')
                 predictions.append(preds)
+
+       del xs1
+       gc.collect()
 
 
 preds = pd.concat(predictions).sort_index()
 feats = data.join(preds['WaveNet'], how='left')
 feats.dropna(subset=['WaveNet'], inplace=True)
 dates = feats.index.get_level_values('date').unique().to_list()
-strat_rets = process_jobs(dates, feats, signal_col='WaveNet')
+strat_rets = process_jobs(dates, feats, signal_col='WaveNet', prefer=None)
 bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('WaveNet'))
 print(bt)
+      
+      
 
 
 
