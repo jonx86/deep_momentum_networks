@@ -1,6 +1,9 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 import copy
+from datetime import datetime
+from pytz import timezone
+import pytz
 
 from sklearn.preprocessing import RobustScaler
 
@@ -16,6 +19,7 @@ from utils.utils import *
 
 import optuna
 import os, glob, sys
+import random
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -42,28 +46,43 @@ loss_func_name = sys.argv[2]
 gpu = sys.argv[3]
 n_trials = int(sys.argv[4])
 n_jobs = int(sys.argv[5])
+max_epochs = int(sys.argv[6])
+sampler_type = sys.argv[7]
 
 batch_size_space = [256, 512, 1024, 2048]
 learning_rate_space = [10**-5, 10**-4, 10**-3, 10**-2, 10**-1, 10**0]
 maximum_gradient_norm_space = [10**-4, 10**-3, 10**-2, 10**-1, 10**0, 10**1]
 hidden_size_space = [5, 10, 20, 40, 80]
 dropout_space = [0.1, 0.2, 0.3, 0.4, 0.5]
+weight_space = [0.6, 0.55, 0.5, 0.45, 0.4]
 
-# batch_size_space = [2048]
-# learning_rate_space = [0.001]
-# maximum_gradient_norm_space = [0.01]
-# hidden_size_space = [20]
-# dropout_space = [0.3]
+print(model_name, loss_func_name, gpu, n_trials, n_jobs, max_epochs)
 
-print(model_name, loss_func_name, gpu, n_trials, n_jobs)
-filename = model_name + "_" + loss_func_name
-outfile = open("results/" + filename + ".txt", "w")
-outfile_best_param = open("results/best_params_" + filename + ".txt", "w")
+##########################################################
+# Create directory to store data
+##########################################################
+filename = model_name + "_" + loss_func_name + "_" + sampler_type + "_" + str(max_epochs)
+
+now = datetime.now(tz=pytz.utc)
+now = now.astimezone(timezone('US/Pacific'))
+data_str = now.strftime("%m%d") + "_" + now.strftime('%H%M%S')
+loc_results = "files/" + filename + "_" + data_str + "/"
+loc_weights = "files/" + filename + "_" + data_str + "/"
+loc_images = "files/" + filename + "_" + data_str + "/"
+if not os.path.exists(loc_results):
+    os.makedirs(loc_results)
+if not os.path.exists(loc_weights):
+    os.makedirs(loc_weights)
+if not os.path.exists(loc_images):
+    os.makedirs(loc_images)
+
+outfile = open(loc_results + filename + ".txt", "w")
+outfile_best_param = open(loc_results + "best_params_" + filename + ".txt", "w")
 model_name = model_name + loss_func_name
 
-# Parameters
-model_path = 'model_weights/' + filename + '_model_'
+model_path = loc_weights + filename + '_model_'
 cv_global = 0
+
 ##########################################################
 # Training
 ##########################################################
@@ -71,6 +90,8 @@ cv_global = 0
 start_time = time.time()
 
 def run_train(params):
+    global global_val_loss
+    global learning_curves_global
 
     batch_size = params['batch_size']
     epochs = 100
@@ -110,10 +131,14 @@ def run_train(params):
     optimizer = Adam(model.parameters(), lr=learning_rate)
     scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=True)
     loss_func = getattr(L, loss_func_name)
-    loss_func = loss_func()
+    if loss_func_name == "SharpeLossCustom":
+        loss_func = loss_func(params['weight'])
+    else:
+        loss_func = loss_func()
 
     early_stop_count = 0
     best_val_loss = float('inf')
+    learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
     for epoch in range(epochs):
         train_loss = train_model(epoch,
                                  model,
@@ -140,13 +165,13 @@ def run_train(params):
         else:
             early_stop_count += 1
 
-        global global_val_loss
         if val_loss < global_val_loss:
             global_val_loss = val_loss
             best_model = copy.deepcopy(model)
             torch.save(best_model, model_path + str(idx) + '.pt')
             best_model_state = copy.deepcopy(best_model.state_dict())
             torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
+            learning_curves_global = learning_curves
 
         # print(epoch, "Training Loss: %.4f. Validation Loss: %.4f. " % (train_loss, val_loss))
 
@@ -171,12 +196,18 @@ def objective(trial):
         'dropout': dropout,
     }
 
+    if loss_func_name == "SharpeLossCustom":
+        weight = trial.suggest_categorical('weight', weight_space)
+        params['weight'] = weight
+
     best_val_loss = run_train(params)
     return best_val_loss
 
 def run_hyper_parameter_tuning():
-    # sampler = optuna.samplers.TPESampler(seed=42)
-    sampler = optuna.samplers.RandomSampler(seed=0)
+    if sampler_type == 'TPE':
+        sampler = optuna.samplers.TPESampler(seed=0)
+    elif sampler_type == 'Random':
+        sampler = optuna.samplers.RandomSampler(seed=0)
     study = optuna.create_study(sampler=sampler)
     study.optimize(objective, n_trials=n_trials, n_jobs=n_jobs, show_progress_bar=True)
 
@@ -205,17 +236,16 @@ for modelname in glob.glob(model_path + "*"):
     print("removed", modelname)
     os.remove(modelname)
 
+MODEL_NAME = 'WaveNet'
+SEC_LEN = 63
 NUM_CORES = -1  # -1 for all cores, there are 3 multi-processed data aggregate functions, because we need to operate on the future level
 
-# used for getting the correct batching of the test set to feed into LSTM
 prep = PrePTestSeqData(X)
 
 # TODO split Xy for seq could to be multi-processed for now this is slow but works - Use joblib
 # My method to process the entire dataset first so I can filter on correct dates for test set and
 # don't need to look back a small window into train set
 
-SEC_LEN = 63
-MODEL_NAME = 'WaveNet'
 FILENAME = f"xs_{SEC_LEN}_{MODEL_NAME}.pickle" # incase we want to test different sequence lenghts
 
 try:
@@ -238,7 +268,7 @@ except Exception:
 predictions = []
 for idx, (train, test) in enumerate(get_cv_splits(X)):
     print("cv run:", idx)
-    learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
+    learning_curves_global = pd.DataFrame(columns=['train_loss', 'val_loss'])
     iter_time = AverageMeter()
     train_losses = AverageMeter()
 
@@ -280,13 +310,13 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     model.load_state_dict(torch.load(model_path + str(idx) + '_state_dict.pt'))
     model.to(gpu)
 
-    learning_curves.plot()
+    learning_curves_global.plot()
     plt.title(f'CV Split: {idx}')
-    plt.savefig('images/' + filename + f'_learning_curves_{idx}.png')
+    plt.savefig(loc_images + filename + f'_learning_curves_{idx}.png')
     plt.clf()
 
     # export the best parameters
-    print('cv: ', cv_global, file=outfile_best_param)
+    print('cv:', cv_global, 'best_val_loss:', global_val_loss, file=outfile_best_param)
     print(best_params, file=outfile_best_param, flush=True)
 
     # we need a tuple of the test set start and end dates
