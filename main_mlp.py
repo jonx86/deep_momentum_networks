@@ -121,8 +121,17 @@ futures = dataset.index.get_level_values('future').unique().tolist()
 
 # Inputs and Targets
 features = [column for column in dataset.columns if column.startswith('feature')]
+new_feats = [c for c in dataset.columns if c.startswith('NEW')]
+
+# create new lags
+for new_feat in new_feats:
+    for l in [1, 2, 3, 4, 5]:
+        dataset[f'lag_{l}_{new_feat}'] = dataset.groupby(by='future')[new_feat].shift(l)
+
+# new lags
 lags = [column for column in dataset.columns if column.startswith('lag')]
-features = features + lags
+features = features + lags + new_feats
+print(len(features))
 target = ['target']
 
 # Workingset
@@ -132,7 +141,7 @@ X = dataset[features + target]
 model_path = 'model.pt'
 early_stopping = 25
 device = torch.device('cpu')
-number_of_features = 10
+number_of_features = 14
 epochs = 100
 dropout = 0.2
 hidden_size = 40

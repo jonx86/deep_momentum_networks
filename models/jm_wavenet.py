@@ -117,9 +117,8 @@ class ResStack(nn.Module):
                                               out_channels=self.out_channels,
                                               kernel_size=2, dilation=42,
                                               device=self.device)
-              
-             
-              
+                
+
        def forward(self, inputs):
               # iterate through the residual stack
               residual_connection, skip_connection1 = self.cnnFiveDilation(inputs)
@@ -134,7 +133,6 @@ class ResStack(nn.Module):
                                    skip_connection4,
                                    skip_connection5))
               return skips
-
 
 
 class FullyConnectedBlock(nn.Module):
@@ -155,42 +153,6 @@ class FullyConnectedBlock(nn.Module):
             outputs = self.seq(inputs)
             return outputs
       
-
-# class FullyConnectedBlock1L(nn.Module):
-#       def __init__(self, out_dim=1):
-#             super(FullyConnectedBlock1L, self).__init__()
-#             self.out_dim=out_dim
-#             self.seq = nn.Sequential(
-#                   nn.LazyLinear(self.out_dim),
-#                   nn.Tanh())
-            
-#       def forward(self, inputs):
-#             outputs = self.seq(inputs)
-#             return outputs
-      
-
-# class OnebyOneBlock(nn.Module):
-#        def __init__(self, kernel, in_channels, out_channels, out_dim=1):
-#             super(OnebyOneBlock, self).__init__()
-#             self.kernel=kernel
-#             self.in_channels=in_channels
-#             self.out_channels=out_channels
-#             self.out_dim=out_dim
-
-#             self.seq = nn.Sequential(
-#                    nn.Conv1d(in_channels=self.in_channels,
-#                              out_channels=self.out_channels,
-#                              kernel_size=1),
-#                    nn.Tanh(),
-#                    nn.Conv1d(in_channels=self.out_channels,
-#                              out_channels=out_dim,
-#                              kernel_size=1),
-#                    nn.Tanh())
-      
-#        def forward(self, inputs):
-#               outputs = self.seq(inputs)
-#               return outputs.squeeze(1)[:, -1]
-       
 
 class WaveNet(nn.Module):
 
@@ -263,7 +225,7 @@ model_path = 'model_WaveNet.pt'
 MODEL_NAME = 'WaveNet'
 IN_CHANNELS = 60
 HIDDEN_DIM = 20
-OUT_CHANNELS = 10
+OUT_CHANNELS = 4
 SEC_LEN=63
 DROPOUT_RATE = .30
 BATCH_SIZE = 1024
