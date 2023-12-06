@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 
-from losses.ryan_losses import SharpeLoss
+from losses.jm_loss import SharpeLoss
 from models.ryan_mlp import MLP
 from utils.utils import load_features, get_cv_splits, train_val_split, process_jobs, get_returns_breakout
 
@@ -80,8 +80,6 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, clip):
     losses = AverageMeter()
 
     model.train()
-
-    model.train()
     for idx, (data, target) in enumerate(train_loader):
         start = time.time()
 
@@ -111,7 +109,6 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, clip):
 
 
 
-
 # Dataset
 dataset = load_features()
 dataset.dropna(inplace=True)
@@ -121,16 +118,10 @@ futures = dataset.index.get_level_values('future').unique().tolist()
 
 # Inputs and Targets
 features = [column for column in dataset.columns if column.startswith('feature')]
-new_feats = [c for c in dataset.columns if c.startswith('NEW')]
-
-# create new lags
-for new_feat in new_feats:
-    for l in [1, 2, 3, 4, 5]:
-        dataset[f'lag_{l}_{new_feat}'] = dataset.groupby(by='future')[new_feat].shift(l)
 
 # new lags
 lags = [column for column in dataset.columns if column.startswith('lag')]
-features = features + lags + new_feats
+features = features + lags 
 print(len(features))
 target = ['target']
 
@@ -141,7 +132,7 @@ X = dataset[features + target]
 model_path = 'model.pt'
 early_stopping = 25
 device = torch.device('cpu')
-number_of_features = 14
+number_of_features = 10
 epochs = 100
 dropout = 0.2
 hidden_size = 40
@@ -153,6 +144,7 @@ lr_scheduler = True
 
 if os.path.exists(model_path):
     os.remove(model_path)
+
 predictions = [0] * 6
 # now start the loop
 for idx, (train, test) in enumerate(get_cv_splits(X)):

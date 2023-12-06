@@ -385,7 +385,7 @@ def split_rolling_sequences_for_cnn(X: pd.DataFrame, y: pd.Series, lookback=10,
         return xs, ys
 
 
-def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:bool=False, seq_out=True, device='cuda'):
+def get_seq_test_preds(model, scaler, X_test_single_future:list, features:list, lstm:bool=False, seq_out=True, device='cuda'):
     """
     model: nn.Module like
     X_test_single_future: list of sequences for a single future
@@ -397,14 +397,9 @@ def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:boo
     idx = []
     for x in X_test_single_future:
         # data
-        data_pred = x[features].copy()
-        data_pred = data_pred.values.T if not lstm else data_pred.values
+        data_pred = scaler.transform(x[features].copy())
+        data_pred = data_pred.T if not lstm else data_pred
         data_pred = torch.tensor(data_pred, dtype=torch.float32)
-
-        # we need to retain the pandas multi-index
-        # x.reset_index(inplace=True)
-        # x.set_index(['date', 'future'], inplace=True)
-
         data_pred = data_pred.to(torch.device(device))
 
         # this one training example of size (N=1, C=60, L=20) or whatever the look-back is
@@ -413,8 +408,6 @@ def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:boo
         #print(data_pred.shape)
         preds = model(data_pred)
         preds = preds.cpu().detach().numpy()
-
-        #print(f'Shape of Preds: {preds.shape}')
 
         if seq_out:
             preds = preds[:, -1, :]
@@ -429,15 +422,11 @@ def get_seq_test_preds(model, X_test_single_future:list, features:list, lstm:boo
     return out
 
 
-def aggregate_seq_preds(model, X_test:list, features:list, lstm=True, seq_out=True, device='cpu', n_jobs=-1, prefer=None):
+def aggregate_seq_preds(model, scaler, X_test:list, features:list, lstm=True, seq_out=True, device='cpu', n_jobs=-1, prefer=None):
     # return predictions
      # NOTE with roughly 8k daily observations this takes 20 minutes on cores=24 for a single strategy back-test
-    results = Parallel(n_jobs=n_jobs, prefer=prefer, verbose=True)(delayed(get_seq_test_preds)(model, x,
-                                                                               features, lstm,
-                                                                               seq_out,
-                                                                               device) for x in X_test)
+    results = Parallel(n_jobs=n_jobs, prefer=prefer, verbose=True)(delayed(get_seq_test_preds)(model, scaler, x, features, lstm, seq_out,device) for x in X_test)
     return pd.concat(results, axis=0).sort_index()
-
 
 
 def split_Xy_inner_func(_x, _y, step_size, return_pandas, split_func, return_seq_target, lstm, future)->tuple:
