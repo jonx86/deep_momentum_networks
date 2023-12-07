@@ -123,7 +123,7 @@ try:
             newX = pickle.load(f)
             print(f"Loading pickle took: {time.time() - start}")
 except Exception:
-        newX, _ = split_Xy_for_seq(X[features], X['target'],
+        newX, _ = split_Xy_for_seq(X[PAPER_BASE_FEATS], X['target'],
                                    step_size=SEC_LEN,
                                    return_seq_target=True,
                                    lstm=True)
@@ -140,8 +140,8 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         train_losses = AverageMeter()
         
         # break out X and y train
-        X_train, y_train = train[features], train[target] 
-        X_test, y_test = test[features], test[target]
+        X_train, y_train = train[PAPER_BASE_FEATS], train[target] 
+        X_test, y_test = test[PAPER_BASE_FEATS], test[target]
 
         # validation split
         X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
@@ -239,7 +239,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         with torch.no_grad():
                 model.eval()
                 # feed in sequences for each future and get the predictions, take just the last time-step
-                preds = aggregate_seq_preds(model, scaler, xs1, features=features,
+                preds = aggregate_seq_preds(model, scaler, xs1, features=PAPER_BASE_FEATS,
                                             device=DEVICE, lstm=True, seq_out=True,
                                             n_jobs=NUM_CORES)
                 preds = preds.to_frame('lstm')

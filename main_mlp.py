@@ -148,8 +148,8 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     train_losses = AverageMeter()
 
     # break out X and y train
-    X_train, y_train = train[features], train[target]
-    X_test, y_test = test[features], test[target]
+    X_train, y_train = train[MLP_FEATURES], train[target]
+    X_test, y_test = test[MLP_FEATURES], test[target]
 
     # validation split
     X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
