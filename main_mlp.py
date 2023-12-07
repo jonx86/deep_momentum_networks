@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 
 from losses.jm_loss import SharpeLoss
 from models.ryan_mlp import MLP
-from utils.utils import load_features, get_cv_splits, train_val_split, process_jobs, get_returns_breakout
+from utils.utils import load_features, get_cv_splits, train_val_split, process_jobs, get_returns_breakout, MLP_FEATURES
 
 import os
 torch.manual_seed(0)
@@ -39,9 +39,12 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def load_data_torch(X, y, batch_size=64):
+def load_data_torch(X, y, batch_size=64, device='cpu'):
     X = torch.tensor(X, dtype=torch.float32)
     y = torch.tensor(y.values, dtype=torch.float32)
+
+    X = X.to(torch.device(device=device))
+    y = y.to(torch.device(device=device))
 
     loader = DataLoader(list(zip(X, y)), shuffle=False, batch_size=batch_size)
     return loader
@@ -115,28 +118,20 @@ dataset.dropna(inplace=True)
 
 # Future IDs
 futures = dataset.index.get_level_values('future').unique().tolist()
-
-# Inputs and Targets
-features = [column for column in dataset.columns if column.startswith('feature')]
-
-# new lags
-lags = [column for column in dataset.columns if column.startswith('lag')]
-features = features + lags 
-print(len(features))
 target = ['target']
 
 # Workingset
-X = dataset[features + target]
+X = dataset[MLP_FEATURES + target]
 
 # Parameters
 model_path = 'model.pt'
 early_stopping = 25
-device = torch.device('cpu')
-number_of_features = 10
+device = torch.device('cuda')
+number_of_features = 8
 epochs = 100
 dropout = 0.2
 hidden_size = 40
-batch_size = 256
+batch_size = 516
 learning_rate = 0.001
 maximum_gradient_norm = 0.1
 lr_scheduler = True
@@ -167,8 +162,8 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     X_val = scaler.transform(X_val)
 
     # our data-loaders
-    dataloader = load_data_torch(X_train2, y_train2, batch_size=batch_size)
-    valdataloader = load_data_torch(X_val, y_val, batch_size=batch_size)
+    dataloader = load_data_torch(X_train2, y_train2, batch_size=batch_size, device=device)
+    valdataloader = load_data_torch(X_val, y_val, batch_size=batch_size, device=device)
 
     # model
     model = MLP(lookback_size=5, input_size=number_of_features,
@@ -219,8 +214,8 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     # scale
     X_test2 = X_test.copy()
     X_test2 = scaler.transform(X_test2)
-
     X_test2 = torch.tensor(X_test2, dtype=torch.float32)
+    X_test2 = X_test2.to(device)
 
     model.load_state_dict(torch.load(model_path))
     with torch.no_grad():

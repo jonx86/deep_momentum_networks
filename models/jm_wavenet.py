@@ -382,6 +382,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                 model.eval()
                 # feed in sequences for each future and get the predictions, take just the last time-step
                 preds = aggregate_seq_preds(model, xs1,
+                                            scaler=scaler,
                                             features=features,
                                             device=DEVICE,
                                             lstm=False,

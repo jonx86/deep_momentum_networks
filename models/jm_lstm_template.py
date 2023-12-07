@@ -29,9 +29,8 @@ torch.manual_seed(0)
 ######################################
 
 data = load_features()
-features = [f for f in data.columns if f.startswith('feature')]
 target = ['target']
-both = features+target
+both = PAPER_BASE_FEATS+target
 
 full = data[both].dropna(subset=both)
 X = full[both]
@@ -236,11 +235,13 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                        (test_start, test_end),
                         newX, n_jobs=NUM_CORES)
 
-        model.load_state_dict(torch.load(model_path))
+        #model.load_state_dict(torch.load(model_path))
         with torch.no_grad():
                 model.eval()
                 # feed in sequences for each future and get the predictions, take just the last time-step
-                preds = aggregate_seq_preds(model, scaler, xs1, features=features, device=DEVICE, lstm=True, seq_out=True, n_jobs=NUM_CORES)
+                preds = aggregate_seq_preds(model, scaler, xs1, features=features,
+                                            device=DEVICE, lstm=True, seq_out=True,
+                                            n_jobs=NUM_CORES)
                 preds = preds.to_frame('lstm')
                 predictions.append(preds)
 
