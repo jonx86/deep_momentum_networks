@@ -97,7 +97,7 @@ class FullLSTM(nn.Module):
 # early stopping
 EARLY_STOPPING = 25
 model_path = 'transformer_encode.pt'
-HIDDEN_DIM = 40
+HIDDEN_DIM = 20
 INPUT = 10
 SEC_LEN=63
 DROPOUT_RATE = .30
@@ -239,8 +239,11 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         with torch.no_grad():
                 model.eval()
                 # feed in sequences for each future and get the predictions, take just the last time-step
-                preds = aggregate_seq_preds(model, scaler, xs1, features=PAPER_BASE_FEATS,
-                                            device=DEVICE, lstm=True, seq_out=True,
+                preds = aggregate_seq_preds(model, scaler, xs1,
+                                            features=PAPER_BASE_FEATS,
+                                            device=DEVICE,
+                                            lstm=True,
+                                            seq_out=True,
                                             n_jobs=NUM_CORES)
                 preds = preds.to_frame('lstm')
                 predictions.append(preds)

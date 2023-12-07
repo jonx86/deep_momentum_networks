@@ -73,7 +73,7 @@ PAPER_BASE_FEATS = ['feature_1d_ra',
                     'feature_12M_ra',
                     'feature_MACD_short',
                     'feature_MACD_medium',
-                    'feature_MACD_long'] 
+                    'feature_MACD_long']
 
 
 def getPortVol(weights, cov, ann_factor=252):

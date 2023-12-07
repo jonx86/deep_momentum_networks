@@ -10,16 +10,44 @@ import torch
 import torch.nn as nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
-
 from losses.jm_loss import SharpeLoss
-from models.ryan_mlp import MLP
-from utils.utils import load_features, get_cv_splits, train_val_split, process_jobs, get_returns_breakout, MLP_FEATURES
+from utils.utils import (load_features, get_cv_splits,
+                         train_val_split, process_jobs,
+                         get_returns_breakout,
+                        MLP_FEATURES, LAG_FIVE_ONLY,
+                        PAPER_BASE_FEATS)
 
 import os
 torch.manual_seed(0)
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 outfile = open("outputs", "w")
+
+
+class MLP(nn.Module):
+    def __init__(self, hidden_size=5, dropout=.30, input_dim=60, output_dim=1):
+        super(MLP, self).__init__()
+
+        # init the params
+        self.hidden_size = hidden_size
+        self.dropout = dropout
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+
+        # init the layers
+        self.fc1 = nn.Linear(self.input_dim, self.hidden_size)
+        self.fc2 = nn.Linear(self.hidden_size, self.output_dim)
+
+        # dorp out on the first two layers only?
+        self.dropOut1 = nn.Dropout(p=self.dropout)
+        self.dropOut2 = nn.Dropout(p=self.dropout)
+    
+    def forward(self, inputs):
+        # roll through model
+        outputs = self.dropOut1(torch.tanh(self.fc1(inputs)))
+        outputs = self.dropOut2(torch.tanh(self.fc2(outputs)))
+        #print('Size of Outputs', outputs.shape)
+        return outputs
 
 
 class AverageMeter(object):
@@ -111,7 +139,6 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, clip):
     return losses.avg
 
 
-
 # Dataset
 dataset = load_features()
 dataset.dropna(inplace=True)
@@ -130,10 +157,10 @@ device = torch.device('cuda')
 number_of_features = 8
 epochs = 100
 dropout = 0.2
-hidden_size = 40
-batch_size = 516
+hidden_size = 20
+batch_size = 512
 learning_rate = 0.001
-maximum_gradient_norm = 0.1
+maximum_gradient_norm = 0.001
 lr_scheduler = True
 
 
@@ -166,13 +193,12 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     valdataloader = load_data_torch(X_val, y_val, batch_size=batch_size, device=device)
 
     # model
-    model = MLP(lookback_size=5, input_size=number_of_features,
-                hidden_size=hidden_size,
-                dropout=dropout, device=device)
-    if os.path.exists(model_path):
-        print('model loaded')
-        model.load_state_dict(torch.load(model_path))
-        os.remove(model_path)
+    model = MLP(hidden_size=hidden_size, dropout=dropout, input_dim=16)
+    model.to(torch.device('cuda'))
+    # if os.path.exists(model_path):
+    #     print('model loaded')
+    #     model.load_state_dict(torch.load(model_path))
+    #     os.remove(model_path)
 
     optimizer = Adam(model.parameters(), lr=learning_rate)
     scheduler = ReduceLROnPlateau(optimizer, mode='min',
@@ -198,7 +224,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), model_path)
+            #torch.save(model.state_dict(), model_path)
             early_stop_count = 0
         else:
             early_stop_count += 1
@@ -217,7 +243,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     X_test2 = torch.tensor(X_test2, dtype=torch.float32)
     X_test2 = X_test2.to(device)
 
-    model.load_state_dict(torch.load(model_path))
+    #model.load_state_dict(torch.load(model_path))
     with torch.no_grad():
         model.eval()
         preds = model(X_test2)
@@ -236,7 +262,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     values = get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench'))
     print('idx: ', idx, file=outfile)
     print(values, file=outfile, flush=True)
-
+   
 preds=pd.concat(predictions).sort_index()
 preds = preds.to_frame('mlp')
 feats = dataset.join(preds[['mlp']], how='left')
@@ -245,5 +271,4 @@ dates = feats.index.get_level_values('date').unique().to_list()
 strat_rets = process_jobs(dates, feats, signal_col='mlp')
 print('Final', file=outfile, flush=True)
 print(get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench')), file=outfile, flush=True)
-
 outfile.close()
