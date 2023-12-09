@@ -36,15 +36,21 @@ X = full[both]
 
 
 class simpleLSTM(nn.Module):
-        def __init__(self, input_dim, hidden_dim, dropout_rate=.30):
+        def __init__(self, input_dim, hidden_dim, layers=2, dropout_rate=.30):
                 super(simpleLSTM, self).__init__()
                 self.input_dim = input_dim
                 self.hidden_dim = hidden_dim
-                self.dropout_rate = dropout_rate
+                self.num_layers = layers
+
+                if self.num_layers >1:
+                        self.dropout = dropout_rate
+                else:
+                        self.dropout = None
 
                 self.lstm = nn.LSTM(input_size=self.input_dim,
                                     hidden_size=self.hidden_dim,
-                                    num_layers=1,
+                                    num_layers=self.num_layers,
+                                    dropout=self.dropout,
                                     batch_first=True)
                 
                 # you may or may not need to do this, LSTM does not work on GPU for me 
@@ -63,15 +69,21 @@ class simpleLSTM(nn.Module):
         
 
 class FullLSTM(nn.Module):
-        def __init__(self, input_dim, hidden_dim, dropout_rate=.30):
+        def __init__(self, input_dim, hidden_dim, layers=1, dropout_rate=.30):
                 super(FullLSTM, self).__init__()
                 self.input_dim = input_dim
                 self.hidden_dim = hidden_dim
-                self.dropout_rate = dropout_rate
+                self.num_layers = layers
+
+                if self.num_layers >1:
+                        self.dropout = dropout_rate
+                else:
+                        self.dropout = None
 
                 self.lstm = nn.LSTM(input_size=self.input_dim,
                                     hidden_size=self.hidden_dim,
-                                    num_layers=1,
+                                    num_layers=self.num_layers,
+                                    dropout=self.dropout, 
                                     batch_first=True)
                 
                 # you may or may not need to do this, LSTM does not work on GPU for me 
@@ -95,7 +107,7 @@ class FullLSTM(nn.Module):
 
 # early stopping
 EARLY_STOPPING = 25
-model_path = 'lstm_base_CV0.pt'
+model_path = 'lstm_base_CV5.pt'
 HIDDEN_DIM = 20
 INPUT = 8
 SEC_LEN=63
@@ -144,7 +156,9 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         X_test, y_test = test[PAPER_BASE_FEATS], test[target]
 
         # validation split
-        X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train, train_pct=.90)
+        X_train2, X_val, y_train2, y_val = train_val_split(X_train,
+                                                          y_train,
+                                                          train_pct=.90)
 
         # scale the data
         scaler = RobustScaler()
@@ -177,7 +191,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                      batch_size=BATCH_SIZE,
                                      device=DEVICE)
 
-        model = simpleLSTM(input_dim=INPUT, hidden_dim=HIDDEN_DIM)
+        model = simpleLSTM(input_dim=INPUT, hidden_dim=HIDDEN_DIM, dropout_rate=DROPOUT_RATE)
         model.to(torch.device(DEVICE))
         
         optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
@@ -248,7 +262,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                 preds = preds.to_frame('lstm')
                 predictions.append(preds)
 
-        # run back-test
+        #run back-test
         preds = pd.concat(predictions).sort_index()
         feats = data.join(preds['lstm'], how='left')
         feats.dropna(subset=['lstm'], inplace=True)
@@ -257,9 +271,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
         print(bt)
         break
-
-
-
+        
 # run back-test
 # preds = pd.concat(predictions).sort_index()
 # feats = data.join(preds['lstm'], how='left')

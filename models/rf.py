@@ -28,7 +28,7 @@ X.dropna(inplace=True)
 
 # set up a base model
 baseRF = RandomForestRegressor(max_depth=5, 
-                               n_estimators=1000,
+                               n_estimators=500,
                                max_features=int(1),
                                n_jobs=10)
 
