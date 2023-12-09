@@ -144,7 +144,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         X_test, y_test = test[PAPER_BASE_FEATS], test[target]
 
         # validation split
-        X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
+        X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train, train_pct=.90)
 
         # scale the data
         scaler = RobustScaler()
