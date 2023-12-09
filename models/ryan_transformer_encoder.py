@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class TransformerEncoder(nn.Module):
-    def __init__(self, input_size, hidden_size, maximum_length, number_of_heads=4, number_of_encoder_layers=1, feedforward_size=100, dropout=0.0, device=None):
+    def __init__(self, input_size, hidden_size, maximum_length, number_of_heads=2, number_of_encoder_layers=1, feedforward_size=None, dropout=0.0, device=None):
         super(TransformerEncoder, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -11,6 +11,8 @@ class TransformerEncoder(nn.Module):
         self.number_of_heads = number_of_heads
         self.number_of_encoder_layers = number_of_encoder_layers
         self.feedforward_size = feedforward_size
+        if self.feedforward_size is None:
+            self.feedforward_size = self.hidden_size
         self.dropout = dropout
         self.device = device
 
