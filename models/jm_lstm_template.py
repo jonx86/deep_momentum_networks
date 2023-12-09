@@ -93,181 +93,181 @@ class FullLSTM(nn.Module):
                 return outputs
 
 
-# # early stopping
-# EARLY_STOPPING = 25
-# model_path = 'lstm_base_CV0.pt'
-# HIDDEN_DIM = 20
-# INPUT = 8
-# SEC_LEN=63
-# DROPOUT_RATE = .20
-# BATCH_SIZE = 256
-# EPOCHS = 50
-# LEARNING_RATE = 1e-3
-# DEVICE = 'cpu'
-# NUM_CORES = -4 # -1 for all cores, there are 3 multi-processed data aggregate functions, because we need to operate on the future level
+# early stopping
+EARLY_STOPPING = 25
+model_path = 'lstm_base_CV0.pt'
+HIDDEN_DIM = 20
+INPUT = 8
+SEC_LEN=63
+DROPOUT_RATE = .20
+BATCH_SIZE = 256
+EPOCHS = 50
+LEARNING_RATE = 1e-3
+DEVICE = 'cpu'
+NUM_CORES = -4 # -1 for all cores, there are 3 multi-processed data aggregate functions, because we need to operate on the future level
 
-# # used for getting the correct batching of the test set to feed into LSTM
-# prep = PrePTestSeqData(X)
+# used for getting the correct batching of the test set to feed into LSTM
+prep = PrePTestSeqData(X)
 
-# # TODO split Xy for seq could to be multi-processed for now this is slow but works - Use joblib
-# # My method to process the entire dataset first so I can filter on correct dates for test set and
-# # don't need to look back a small window into train set
+# TODO split Xy for seq could to be multi-processed for now this is slow but works - Use joblib
+# My method to process the entire dataset first so I can filter on correct dates for test set and
+# don't need to look back a small window into train set
 
-# FILENAME = f"xs_{SEC_LEN}.pickle" # incase we want to test different sequence lenghts
+FILENAME = f"xs_{SEC_LEN}.pickle" # incase we want to test different sequence lenghts
 
-# try:
-#     with open(FILENAME, "rb") as f:
-#             print('loading pickle .....')
-#             start = time.time()
-#             newX = pickle.load(f)
-#             print(f"Loading pickle took: {time.time() - start}")
-# except Exception:
-#         newX, _ = split_Xy_for_seq(X[PAPER_BASE_FEATS],
-#                                    X['target'],
-#                                    step_size=SEC_LEN,
-#                                    return_seq_target=True,
-#                                    lstm=True)
+try:
+    with open(FILENAME, "rb") as f:
+            print('loading pickle .....')
+            start = time.time()
+            newX = pickle.load(f)
+            print(f"Loading pickle took: {time.time() - start}")
+except Exception:
+        newX, _ = split_Xy_for_seq(X[PAPER_BASE_FEATS],
+                                   X['target'],
+                                   step_size=SEC_LEN,
+                                   return_seq_target=True,
+                                   lstm=True)
 
-#         with open(FILENAME, "wb") as f:
-#                 pickle.dump(newX, f)
-#                 print("dumped file")
+        with open(FILENAME, "wb") as f:
+                pickle.dump(newX, f)
+                print("dumped file")
         
 
-# predictions = []
-# for idx, (train, test) in enumerate(get_cv_splits(X)):
-#         learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
-#         iter_time = AverageMeter()
-#         train_losses = AverageMeter()
+predictions = []
+for idx, (train, test) in enumerate(get_cv_splits(X)):
+        learning_curves = pd.DataFrame(columns=['train_loss', 'val_loss'])
+        iter_time = AverageMeter()
+        train_losses = AverageMeter()
         
-#         # break out X and y train
-#         X_train, y_train = train[PAPER_BASE_FEATS], train[target] 
-#         X_test, y_test = test[PAPER_BASE_FEATS], test[target]
+        # break out X and y train
+        X_train, y_train = train[PAPER_BASE_FEATS], train[target] 
+        X_test, y_test = test[PAPER_BASE_FEATS], test[target]
 
-#         # validation split
-#         X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
+        # validation split
+        X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
 
-#         # scale the data
-#         scaler = RobustScaler()
-#         scaler.fit(X_train2)
+        # scale the data
+        scaler = RobustScaler()
+        scaler.fit(X_train2)
 
-#         # We want to fit only on the 90% xVal
-#         X_train2 = retain_pandas_after_scale(X_train2, scaler=scaler)
-#         X_val = retain_pandas_after_scale(X_val, scaler=scaler)
+        # We want to fit only on the 90% xVal
+        X_train2 = retain_pandas_after_scale(X_train2, scaler=scaler)
+        X_val = retain_pandas_after_scale(X_val, scaler=scaler)
 
-#         # this function 
-#         X_val, y_val = split_Xy_for_seq(X_train=X_val,
-#                                     y_train=y_val,
-#                                     step_size=SEC_LEN,
-#                                     return_pandas=False,
-#                                     lstm=True,
-#                                     return_seq_target=True)
+        # this function 
+        X_val, y_val = split_Xy_for_seq(X_train=X_val,
+                                    y_train=y_val,
+                                    step_size=SEC_LEN,
+                                    return_pandas=False,
+                                    lstm=True,
+                                    return_seq_target=True)
         
-#         X_train2, y_train2 = split_Xy_for_seq(X_train=X_train2,
-#                                        y_train=y_train2,
-#                                        step_size=SEC_LEN,
-#                                        return_pandas=False,
-#                                        lstm=True,
-#                                        return_seq_target=True)
+        X_train2, y_train2 = split_Xy_for_seq(X_train=X_train2,
+                                       y_train=y_train2,
+                                       step_size=SEC_LEN,
+                                       return_pandas=False,
+                                       lstm=True,
+                                       return_seq_target=True)
         
-#         train_loader = load_data_torch(X_train2, y_train2,
-#                                        batch_size=BATCH_SIZE,
-#                                        device=DEVICE)
+        train_loader = load_data_torch(X_train2, y_train2,
+                                       batch_size=BATCH_SIZE,
+                                       device=DEVICE)
         
-#         val_loader = load_data_torch(X_val, y_val,
-#                                      batch_size=BATCH_SIZE,
-#                                      device=DEVICE)
+        val_loader = load_data_torch(X_val, y_val,
+                                     batch_size=BATCH_SIZE,
+                                     device=DEVICE)
 
-#         model = simpleLSTM(input_dim=INPUT, hidden_dim=HIDDEN_DIM)
-#         model.to(torch.device(DEVICE))
+        model = simpleLSTM(input_dim=INPUT, hidden_dim=HIDDEN_DIM)
+        model.to(torch.device(DEVICE))
         
-#         optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
-#         scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=True)
-#         loss_fnc = SharpeLoss(risk_trgt=.15)
+        optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=True)
+        loss_fnc = SharpeLoss(risk_trgt=.15)
         
-#         early_stop_count = 0
-#         best_val_loss = float('inf')
-#         # now iterate though all the epochs
-#         for epoch in range(EPOCHS):
-#                 train_loss = train_model(epoch, 
-#                                          model,
-#                                          train_loader=train_loader,
-#                                          optimizer=optimizer,
-#                                          loss_fnc=loss_fnc,
-#                                          clip_norm=True,
-#                                          max_norm=.001,
-#                                          device=DEVICE)
+        early_stop_count = 0
+        best_val_loss = float('inf')
+        # now iterate though all the epochs
+        for epoch in range(EPOCHS):
+                train_loss = train_model(epoch, 
+                                         model,
+                                         train_loader=train_loader,
+                                         optimizer=optimizer,
+                                         loss_fnc=loss_fnc,
+                                         clip_norm=True,
+                                         max_norm=.001,
+                                         device=DEVICE)
                 
-#                 val_loss = validate_model(epoch,
-#                                           model,
-#                                           val_loader,
-#                                           loss_fnc=loss_fnc,
-#                                           device=DEVICE)
+                val_loss = validate_model(epoch,
+                                          model,
+                                          val_loader,
+                                          loss_fnc=loss_fnc,
+                                          device=DEVICE)
                 
-#                 scheduler.step(val_loss)
-#                 learning_curves.loc[epoch, 'train_loss'] = train_loss
-#                 learning_curves.loc[epoch, 'val_loss'] = val_loss
+                scheduler.step(val_loss)
+                learning_curves.loc[epoch, 'train_loss'] = train_loss
+                learning_curves.loc[epoch, 'val_loss'] = val_loss
       
-#                 if val_loss<best_val_loss:
-#                         best_val_loss = val_loss
-#                         torch.save(model.state_dict(), model_path)
-#                         early_stop_count += 0
-#                 else:
-#                         early_stop_count +=1
+                if val_loss<best_val_loss:
+                        best_val_loss = val_loss
+                        torch.save(model.state_dict(), model_path)
+                        early_stop_count += 0
+                else:
+                        early_stop_count +=1
 
-#                 if early_stop_count == EARLY_STOPPING:
-#                         print(f'Early Stopping Applied on Epoch: {epoch}')
-#                         break
+                if early_stop_count == EARLY_STOPPING:
+                        print(f'Early Stopping Applied on Epoch: {epoch}')
+                        break
 
-#         learning_curves.plot()
-#         plt.title(f'CV Split: {idx}')
-#         plt.savefig(f'learning_curves_{idx}_LSTM.png')
-#         plt.clf()
+        learning_curves.plot()
+        plt.title(f'CV Split: {idx}')
+        plt.savefig(f'learning_curves_{idx}_LSTM.png')
+        plt.clf()
                 
-#         # we need a tuple of the test set start and end dates
-#         test_start, test_end = X_test.index.get_level_values('date')[0], X_test.index.get_level_values('date')[-1]
-#         print(f'Test Start :{test_start} | Test End :{test_end}')
+        # we need a tuple of the test set start and end dates
+        test_start, test_end = X_test.index.get_level_values('date')[0], X_test.index.get_level_values('date')[-1]
+        print(f'Test Start :{test_start} | Test End :{test_end}')
 
-#         #NOTE get correct test data takes a long time looping through all 72 futures
-#         # futures and all over-lapping sequences with in each future
-#         # We utilize joblib again to multi-process these batches, looping through sequences within each future
-#         # takes ~1.6 minutes on my machine 24-cores
-#         xs1 = mpSplits(prep.split_single_future,
-#                        (test_start, test_end),
-#                         newX, n_jobs=NUM_CORES)
+        #NOTE get correct test data takes a long time looping through all 72 futures
+        # futures and all over-lapping sequences with in each future
+        # We utilize joblib again to multi-process these batches, looping through sequences within each future
+        # takes ~1.6 minutes on my machine 24-cores
+        xs1 = mpSplits(prep.split_single_future,
+                       (test_start, test_end),
+                        newX, n_jobs=NUM_CORES)
 
-#         model.load_state_dict(torch.load(model_path))
-#         with torch.no_grad():
-#                 model.eval()
-#                 # feed in sequences for each future and get the predictions, take just the last time-step
-#                 preds = aggregate_seq_preds(model, scaler, xs1,
-#                                             features=PAPER_BASE_FEATS,
-#                                             device=DEVICE,
-#                                             lstm=True,
-#                                             seq_out=True,
-#                                             n_jobs=NUM_CORES)
-#                 preds = preds.to_frame('lstm')
-#                 predictions.append(preds)
+        model.load_state_dict(torch.load(model_path))
+        with torch.no_grad():
+                model.eval()
+                # feed in sequences for each future and get the predictions, take just the last time-step
+                preds = aggregate_seq_preds(model, scaler, xs1,
+                                            features=PAPER_BASE_FEATS,
+                                            device=DEVICE,
+                                            lstm=True,
+                                            seq_out=True,
+                                            n_jobs=NUM_CORES)
+                preds = preds.to_frame('lstm')
+                predictions.append(preds)
 
-#         # run back-test
-#         preds = pd.concat(predictions).sort_index()
-#         feats = data.join(preds['lstm'], how='left')
-#         feats.dropna(subset=['lstm'], inplace=True)
-#         dates = feats.index.get_level_values('date').unique().to_list()
-#         strat_rets = process_jobs(dates, feats, signal_col='lstm')
-#         bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
-#         print(bt)
-#         break
+        # run back-test
+        preds = pd.concat(predictions).sort_index()
+        feats = data.join(preds['lstm'], how='left')
+        feats.dropna(subset=['lstm'], inplace=True)
+        dates = feats.index.get_level_values('date').unique().to_list()
+        strat_rets = process_jobs(dates, feats, signal_col='lstm')
+        bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
+        print(bt)
+        break
 
 
 
-# # run back-test
-# # preds = pd.concat(predictions).sort_index()
-# # feats = data.join(preds['lstm'], how='left')
-# # feats.dropna(subset=['lstm'], inplace=True)
-# # dates = feats.index.get_level_values('date').unique().to_list()
-# # strat_rets = process_jobs(dates, feats, signal_col='lstm')
-# # bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
-# # print(bt)
+# run back-test
+# preds = pd.concat(predictions).sort_index()
+# feats = data.join(preds['lstm'], how='left')
+# feats.dropna(subset=['lstm'], inplace=True)
+# dates = feats.index.get_level_values('date').unique().to_list()
+# strat_rets = process_jobs(dates, feats, signal_col='lstm')
+# bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
+# print(bt)
         
 
       

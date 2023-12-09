@@ -361,9 +361,9 @@ def get_cv_splits(feats: pd.DataFrame, split_length: int=252*5):
         yield train, test
 
 
-def train_val_split(X_train: pd.DataFrame, y_train: pd.DataFrame):
+def train_val_split(X_train: pd.DataFrame, y_train: pd.DataFrame, train_pct=.90):
     # train split
-    train_split = round(X_train.shape[0] * .90)
+    train_split = round(X_train.shape[0] * train_pct)
 
     # Xtrain and ytrain
     X_train2 = X_train.head(train_split)
@@ -664,7 +664,7 @@ def validate_model(epoch, model, val_loader, loss_fnc, device='cuda'):
             out = out.to(torch.device(device))
             loss = loss_fnc(out, target)
 
-        losses.update(loss.item(), out.shape[0])
+        losses.update(loss.detach().item(), out.shape[0])
         iter_time.update(time.time() - start)
 
         if idx % 10==0:
@@ -724,7 +724,7 @@ def train_model(epoch, model, train_loader, optimizer, loss_fnc, max_norm=10**-3
 
         optimizer.step()
 
-        losses.update(loss.item(), out.shape[0])
+        losses.update(loss.detach().item(), out.shape[0])
         iter_time.update(time.time() - start)
 
         if idx % 10 == 0:

@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 from torch.optim import Adam, SGD
 from torch.utils.data import DataLoader
-from models.jm_nn import MLP
+#from models.jm_nn import MLP
 from losses.jm_loss import SharpeLoss
 from utils.utils import (load_features, get_cv_splits,
                          train_val_split, process_jobs,
@@ -162,7 +162,7 @@ batch_size = 512
 learning_rate = 1e-3
 maximum_gradient_norm = 0.01
 lr_scheduler = True
-
+val_pct = .80
 
 if os.path.exists(model_path):
     os.remove(model_path)
@@ -179,7 +179,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     X_test, y_test = test[MLP_FEATURES], test[target]
 
     # validation split
-    X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
+    X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train, train_pct=val_pct)
 
     scaler = RobustScaler()
     X_train = scaler.fit_transform(X_train)
@@ -261,6 +261,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     values = get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench'))
     print('idx: ', idx, file=outfile)
     print(values, file=outfile, flush=True)
+    torch.save(model.state_dict(), model_path)
     break
    
 

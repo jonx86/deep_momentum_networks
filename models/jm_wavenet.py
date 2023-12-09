@@ -202,33 +202,27 @@ class WaveNet(nn.Module):
             return skip_connections
 
 
-
-
-
 # bring in the data
 data = load_features()
 
 # create the additional lags shown in the paper
-features = [f for f in data.columns if f.startswith('feature')]
-lags = [l for l in data.columns if l.startswith('lag')]
+features = MLP_FEATURES
 target = ['target']
-both = features+target+lags
+both = features+target
 
 full = data[both].dropna(subset=both)
 print(full.shape)
 X = full[both]
-features+=lags
-
 
 # NOTE - Please tune, batch size, learning rate, hidden size, dropout, max grad norm
 model_path = 'model_WaveNet.pt'
 MODEL_NAME = 'WaveNet'
-IN_CHANNELS = 60
-HIDDEN_DIM = 20
-OUT_CHANNELS = 4
+IN_CHANNELS = 48
+HIDDEN_DIM = 40
+OUT_CHANNELS = 2
 SEC_LEN=63
 DROPOUT_RATE = .30
-BATCH_SIZE = 1024
+BATCH_SIZE = 512
 EPOCHS = 100
 LEARNING_RATE = 1e-3
 DEVICE = 'cuda'
@@ -250,7 +244,7 @@ try:
                   newX = pickle.load(f)
                   print(f"Loading pickle took: {time.time() - start}")
 except Exception:
-      newX, _ = split_Xy_for_seq(X[features], X['target'],
+      newX, _ = split_Xy_for_seq(X[MLP_FEATURES], X['target'],
                                   step_size=SEC_LEN,
                                   return_pandas=True,
                                   return_seq_target=False,
@@ -270,8 +264,8 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
        train_losses = AverageMeter()
 
        # break out X and y train
-       X_train, y_train = train[features], train[target] 
-       X_test, y_test = test[features], test[target]
+       X_train, y_train = train[MLP_FEATURES], train[target] 
+       X_test, y_test = test[MLP_FEATURES], test[target]
 
        # validation split
        X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
@@ -330,13 +324,12 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                       optimizer=optimizer,
                                       loss_fnc=loss_fnc,
                                       clip_norm=True,
-                                      max_norm=.001,
+                                      max_norm=.01,
                                       device=DEVICE)
              
              val_loss = validate_model(epoch, model, val_loader,
                                        loss_fnc=loss_fnc,
                                        device=DEVICE)
-             
              scheduler.step(val_loss)
             
              # append learning curves
@@ -371,25 +364,21 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
 
        xs1 = mpSplits(prep.split_single_future,
                      (test_start, test_end),
-                     newX,
-                     prefer=None,
-                     n_jobs=NUM_CORES)
-       
+                      newX,
+                      prefer=None,
+                      n_jobs=NUM_CORES)
        get_reusable_executor().shutdown(wait=True)
        
        model.load_state_dict(torch.load(model_path))
        with torch.no_grad():
                 model.eval()
                 # feed in sequences for each future and get the predictions, take just the last time-step
-                preds = aggregate_seq_preds(model, xs1,
-                                            scaler=scaler,
-                                            features=features,
+                preds = aggregate_seq_preds(model, scaler, xs1,
+                                            features=MLP_FEATURES,
                                             device=DEVICE,
                                             lstm=False,
                                             seq_out=False,
-                                            prefer=None,
                                             n_jobs=NUM_CORES)
-                
                 get_reusable_executor().shutdown(wait=True)
                 
                 preds = preds.to_frame('WaveNet')
@@ -398,15 +387,15 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
        del xs1
        gc.collect()
 
-
-preds = pd.concat(predictions).sort_index()
-feats = data.join(preds['WaveNet'], how='left')
-feats.dropna(subset=['WaveNet'], inplace=True)
-dates = feats.index.get_level_values('date').unique().to_list()
-strat_rets = process_jobs(dates, feats, signal_col='WaveNet', prefer=None)
-bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('WaveNet'))
-print(bt)
-      
+       preds = pd.concat(predictions).sort_index()
+       feats = data.join(preds['WaveNet'], how='left')
+       feats.dropna(subset=['WaveNet'], inplace=True)
+       dates = feats.index.get_level_values('date').unique().to_list()
+       strat_rets = process_jobs(dates, feats, signal_col='WaveNet', prefer=None)
+       bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('WaveNet'))
+       print(bt)
+       break
+            
       
 
 
