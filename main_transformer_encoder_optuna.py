@@ -42,7 +42,7 @@ seed_torch(0)
 
 # Example: python main_lstm_optuna.py simpleLSTM SharpeLoss cuda:0 50 4
 
-model_name = sys.argv[1]
+model_name_base = sys.argv[1]
 loss_func_name = sys.argv[2]
 gpu = sys.argv[3]
 n_trials = int(sys.argv[4])
@@ -57,12 +57,12 @@ batch_size_space = [256, 512, 1024, 2048]
 hidden_size_space = [10, 20, 40]
 weight_space = [0.6, 0.55, 0.5, 0.45, 0.4]
 
-print(model_name, loss_func_name, gpu, n_trials, n_jobs, max_epochs)
+print(model_name_base, loss_func_name, gpu, n_trials, n_jobs, max_epochs)
 
 ##########################################################
 # Create directory to store data
 ##########################################################
-filename = model_name + "_" + loss_func_name + "_" + sampler_type + "_" + str(max_epochs) + "_" + str(train_pct)+ "_" + str(save_best_val_model)
+filename = model_name_base + "_" + loss_func_name + "_" + sampler_type + "_" + str(max_epochs) + "_" + str(train_pct)+ "_" + str(save_best_val_model)
 
 now = datetime.now(tz=pytz.utc)
 now = now.astimezone(timezone('US/Pacific'))
@@ -73,7 +73,7 @@ if not os.path.exists(loc_files):
 
 outfile = open(loc_files + filename + ".txt", "w")
 outfile_best_param = open(loc_files + "best_params_" + filename + ".txt", "w")
-model_name = model_name + loss_func_name
+model_name = model_name_base + loss_func_name
 
 model_path = loc_files + filename + '_model_'
 cv_global = 0
@@ -246,7 +246,7 @@ prep = PrePTestSeqData(X)
 # don't need to look back a small window into train set
 
 SEC_LEN = 63
-FILENAME = f"xs_{SEC_LEN}_{model_name}.pickle"  # incase we want to test different sequence lenghts
+FILENAME = f"xs_{SEC_LEN}_{model_name_base}.pickle"  # incase we want to test different sequence lenghts
 
 try:
     with open(FILENAME, "rb") as f:
