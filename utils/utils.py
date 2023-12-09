@@ -149,7 +149,7 @@ def get_ret_single_date(data:pd.DataFrame, date:str, signal_col:str, fwd_ret_col
         return out
 
 
-def process_jobs(dates, data, signal_col, n_jobs=10, prefer=None):
+def process_jobs(dates, data, signal_col, n_jobs=-2, prefer=None):
     # NOTE with roughly 8k daily observations this takes 20 minutes on cores=24 for a single strategy back-test
     results = Parallel(n_jobs=n_jobs, prefer=prefer, verbose=True)(delayed(get_ret_single_date)(data, date, signal_col) for date in dates)
     return pd.concat(results, axis=0).sort_index()

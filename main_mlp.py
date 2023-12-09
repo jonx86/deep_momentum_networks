@@ -8,14 +8,14 @@ import time
 
 import torch
 import torch.nn as nn
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 from torch.utils.data import DataLoader
+from models.jm_nn import MLP
 from losses.jm_loss import SharpeLoss
 from utils.utils import (load_features, get_cv_splits,
                          train_val_split, process_jobs,
                          get_returns_breakout,
-                        MLP_FEATURES, LAG_FIVE_ONLY,
-                        PAPER_BASE_FEATS)
+                        MLP_FEATURES)
 
 import os
 torch.manual_seed(0)
@@ -159,8 +159,8 @@ epochs = 100
 dropout = 0.2
 hidden_size = 20
 batch_size = 512
-learning_rate = 0.001
-maximum_gradient_norm = 0.001
+learning_rate = 1e-3
+maximum_gradient_norm = 0.01
 lr_scheduler = True
 
 
@@ -193,16 +193,15 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     valdataloader = load_data_torch(X_val, y_val, batch_size=batch_size, device=device)
 
     # model
-    model = MLP(hidden_size=hidden_size, dropout=dropout, input_dim=16)
+    model = MLP(hidden_size=hidden_size, dropout=dropout, input_dim=48)
     model.to(torch.device('cuda'))
-    # if os.path.exists(model_path):
-    #     print('model loaded')
-    #     model.load_state_dict(torch.load(model_path))
-    #     os.remove(model_path)
+    if os.path.exists(model_path):
+        print('model loaded')
+        model.load_state_dict(torch.load(model_path))
+        os.remove(model_path)
 
     optimizer = Adam(model.parameters(), lr=learning_rate)
-    scheduler = ReduceLROnPlateau(optimizer, mode='min',
-                                 factor=.5, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=True)
     loss_func = SharpeLoss()
 
     early_stop_count = 0
@@ -224,7 +223,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            #torch.save(model.state_dict(), model_path)
+            torch.save(model.state_dict(), model_path)
             early_stop_count = 0
         else:
             early_stop_count += 1
@@ -243,7 +242,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     X_test2 = torch.tensor(X_test2, dtype=torch.float32)
     X_test2 = X_test2.to(device)
 
-    #model.load_state_dict(torch.load(model_path))
+    model.load_state_dict(torch.load(model_path))
     with torch.no_grad():
         model.eval()
         preds = model(X_test2)
@@ -262,13 +261,18 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     values = get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench'))
     print('idx: ', idx, file=outfile)
     print(values, file=outfile, flush=True)
+    break
    
-preds=pd.concat(predictions).sort_index()
-preds = preds.to_frame('mlp')
-feats = dataset.join(preds[['mlp']], how='left')
-feats.dropna(subset=['mlp'], inplace=True)
-dates = feats.index.get_level_values('date').unique().to_list()
-strat_rets = process_jobs(dates, feats, signal_col='mlp')
-print('Final', file=outfile, flush=True)
-print(get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench')), file=outfile, flush=True)
-outfile.close()
+
+# preds=pd.concat(predictions).sort_index()
+# preds = preds.to_frame('mlp')
+# feats = dataset.join(preds[['mlp']], how='left')
+# feats.dropna(subset=['mlp'], inplace=True)
+# dates = feats.index.get_level_values('date').unique().to_list()
+# strat_rets = process_jobs(dates, feats, signal_col='mlp')
+# print('Final', file=outfile, flush=True)
+# print(get_returns_breakout(strat_rets.fillna(0.0).to_frame('mlp_bench')), file=outfile, flush=True)
+# outfile.close()
+
+   
+
