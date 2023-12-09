@@ -50,19 +50,10 @@ n_jobs = int(sys.argv[5])
 max_epochs = int(sys.argv[6])
 sampler_type = sys.argv[7]
 
+# batch_size_space = [128, 256, 512, 1024]
 batch_size_space = [256, 512, 1024, 2048]
-learning_rate_space = [10**-5, 10**-4, 10**-3, 10**-2, 10**-1, 10**0]
-maximum_gradient_norm_space = [10**-4, 10**-3, 10**-2, 10**-1, 10**0, 10**1]
-hidden_size_space = [5, 10, 20, 40, 80]
-dropout_space = [0.1, 0.2, 0.3, 0.4, 0.5]
+hidden_size_space = [10, 20, 40]
 weight_space = [0.6, 0.55, 0.5, 0.45, 0.4]
-
-batch_size_space = [256]
-learning_rate_space = [1e-3]
-maximum_gradient_norm_space = [.001]
-hidden_size_space = [40]
-dropout_space = [0.3]
-weight_space = [0.5]
 
 print(model_name, loss_func_name, gpu, n_trials, n_jobs, max_epochs)
 
@@ -98,7 +89,7 @@ def run_train(params):
     batch_size = params['batch_size']
     epochs = max_epochs
     early_stopping = 25
-    input_dim = 10
+    input_dim = 8
     learning_rate = params['learning_rate']
     maximum_gradient_norm = params['maximum_gradient_norm']
 
@@ -160,28 +151,35 @@ def run_train(params):
         else:
             early_stop_count += 1
 
-        if val_loss < global_val_loss:
-            global_val_loss = val_loss
-            best_model = copy.deepcopy(model)
-            torch.save(best_model, model_path + str(idx) + '.pt')
-            best_model_state = copy.deepcopy(best_model.state_dict())
-            torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
-            learning_curves_global = learning_curves
+        # if val_loss < global_val_loss:
+        #     global_val_loss = val_loss
 
         # print(epoch, "Training Loss: %.4f. Validation Loss: %.4f. " % (train_loss, val_loss))
 
         if early_stop_count == early_stopping:
             break
 
+    if val_loss < global_val_loss:
+        global_val_loss = val_loss
+
+    # if global_val_loss == best_val_loss:
+    if global_val_loss == val_loss:
+        best_model = copy.deepcopy(model)
+        torch.save(best_model, model_path + str(idx) + '.pt')
+        best_model_state = copy.deepcopy(best_model.state_dict())
+        torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
+        learning_curves_global = learning_curves
+
     return best_val_loss
 
 def objective(trial):
 
     batch_size = trial.suggest_categorical('batch_size', batch_size_space)
-    learning_rate = trial.suggest_categorical('learning_rate', learning_rate_space)
-    maximum_gradient_norm = trial.suggest_categorical('maximum_gradient_norm', maximum_gradient_norm_space)
     hidden_size = trial.suggest_categorical('hidden_size', hidden_size_space)
-    dropout = trial.suggest_categorical('dropout', dropout_space)
+    # learning_rate = trial.suggest_loguniform("learning_rate", 10 ** -5, 10 ** -1)
+    learning_rate = trial.suggest_loguniform("learning_rate", 10 ** -4, 10 ** -2)
+    maximum_gradient_norm = trial.suggest_loguniform("maximum_gradient_norm", 10 ** -3, 10 ** -1)
+    dropout = trial.suggest_uniform("dropout", 0.2, 0.4)
 
     params = {
         'batch_size': batch_size,
@@ -213,9 +211,8 @@ def run_hyper_parameter_tuning():
     return best_params
 
 data = load_features()
-features = [f for f in data.columns if f.startswith('feature')]
 target = ['target']
-both = features+target
+both = PAPER_BASE_FEATS+target
 
 full = data[both].dropna(subset=both)
 X = full[both]
@@ -238,20 +235,19 @@ FILENAME = f"xs_{SEC_LEN}.pickle"  # incase we want to test different sequence l
 
 try:
     with open(FILENAME, "rb") as f:
-        print('loading pickle .....')
-        start = time.time()
-        newX = pickle.load(f)
-        print(f"Loading pickle took: {time.time() - start}")
+            print('loading pickle .....')
+            start = time.time()
+            newX = pickle.load(f)
+            print(f"Loading pickle took: {time.time() - start}")
 except Exception:
-    print('creating pickle .....')
-    newX, _ = split_Xy_for_seq(X[features], X['target'],
-                               step_size=SEC_LEN,
-                               return_seq_target=True,
-                               lstm=True)
+        newX, _ = split_Xy_for_seq(X[PAPER_BASE_FEATS], X['target'],
+                                   step_size=SEC_LEN,
+                                   return_seq_target=True,
+                                   lstm=True)
 
-    with open(FILENAME, "wb") as f:
-        pickle.dump(newX, f)
-        print("dumped file")
+        with open(FILENAME, "wb") as f:
+                pickle.dump(newX, f)
+                print("dumped file")
 
 predictions = []
 for idx, (train, test) in enumerate(get_cv_splits(X)):
@@ -261,8 +257,8 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     train_losses = AverageMeter()
 
     # break out X and y train
-    X_train, y_train = train[features], train[target]
-    X_test, y_test = test[features], test[target]
+    X_train, y_train = train[PAPER_BASE_FEATS], train[target]
+    X_test, y_test = test[PAPER_BASE_FEATS], test[target]
 
     # validation split
     X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
@@ -339,8 +335,12 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     with torch.no_grad():
         model.eval()
         # feed in sequences for each future and get the predictions, take just the last time-step
-        preds = aggregate_seq_preds(model, scaler, xs1, features=features, device=gpu, lstm=True, seq_out=True,
-                                    n_jobs=2)
+        preds = aggregate_seq_preds(model, scaler, xs1, features=PAPER_BASE_FEATS, device=gpu, lstm=True, seq_out=True, n_jobs=2)
+        if loss_func_name == 'RegressionLoss':
+            preds = np.sign(preds)
+        if loss_func_name == 'BinaryClassificationLoss':
+            preds -= .50
+            preds = np.sign(preds)
         preds = preds.to_frame(model_name)
         predictions.append(preds)
 
@@ -374,5 +374,5 @@ strat_rets.to_pickle(loc_files + "strat_rets_" + filename + ".pkl")
 ax = strat_rets.fillna(0.).cumsum().plot()
 ax.figure.savefig(loc_files + filename + '_timeline.png')
 
-print(data_str)
+print(filename, data_str)
 print("total time:", (time.time() - start_time) / 60)
