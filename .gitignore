@@ -1,2 +1,6 @@
 *.parquet
+*.png
+*.pkl
+*.pickle
+*.xlsx
 __pycache__
