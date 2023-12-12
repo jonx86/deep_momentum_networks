@@ -2,13 +2,12 @@ import torch
 import torch.nn as nn
 
 
-# input: 1-d tensor of the predictions
-# target: 1-d tensor of r/sigma
-
-
 class RegressionLoss(nn.Module):
+  def __init__(self):
+    super(RegressionLoss, self).__init__()
+
   def forward(self, input, target):
-    M = input.shape[0]
+    M = torch.prod(torch.tensor(input.shape))
 
     difference = input - target
 
@@ -16,8 +15,11 @@ class RegressionLoss(nn.Module):
 
 
 class BinaryLoss(nn.Module):
+  def __init__(self):
+    super(BinaryLoss, self).__init__()
+
   def forward(self, input, target):
-    M = input.shape[0]
+    M = torch.prod(torch.tensor(input.shape))
 
     # agnostic to cuda or cpu
     indicator = 0 * target
@@ -28,27 +30,29 @@ class BinaryLoss(nn.Module):
 
 class AverageReturnsLoss(nn.Module):
   def __init__(self, target_sigma = 0.15):
+    super(AverageReturnsLoss, self).__init__()
     self.target_sigma = target_sigma
 
   def forward(self, input, target):
-    M = input.shape[0]
+    M = torch.prod(torch.tensor(input.shape))
 
-    R = input * self.target_sigma * target
+    R = input * self.target_sigma * target / torch.sqrt(torch.tensor(252))
 
     return -1 / M * torch.sum(R)
 
 
 class SharpeLoss(nn.Module):
   def __init__(self, target_sigma = 0.15):
+    super(SharpeLoss, self).__init__()
     self.target_sigma = target_sigma
 
   def forward(self, input, target):
-    M = input.shape[0]
+    M = torch.prod(torch.tensor(input.shape))
 
-    R = input * self.target_sigma * target
-    R_squared = R * R
+    R = input * self.target_sigma * target / torch.sqrt(torch.tensor(252))
+    R_squared = torch.pow(R, 2)
 
     mu_R = 1 / M * torch.sum(R)
-    mu_R_squared = mu_R * mu_R
+    mu_R_squared = torch.pow(mu_R, 2)
 
-    return -mu_R * torch.sqrt(252) / torch.sqrt(torch.sum(R_squared) / M - mu_R_squared)
+    return -mu_R * torch.sqrt(torch.tensor(252)) / torch.sqrt(torch.sum(R_squared) / M - mu_R_squared)

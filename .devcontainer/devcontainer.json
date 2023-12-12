@@ -1,0 +1,13 @@
+{
+  "name": "dmn",
+  "dockerComposeFile": "../docker/docker-compose.yml",
+  "service": "main",
+  "workspaceFolder": "/home/user/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python"
+      ]
+    }
+  }
+}
