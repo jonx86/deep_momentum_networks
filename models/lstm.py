@@ -205,11 +205,12 @@ class simpleLSTM2LSharpeLoss(nn.Module):
         if self.num_layers > 1:
             self.dropout_rate = dropout_rate
         else:
-            self.dropout = None
+            self.dropout_rate = None
+
         self.lstm = nn.LSTM(input_size=self.input_dim,
                             hidden_size=self.hidden_dim,
                             num_layers=self.num_layers,
-                            dropout=self.dropout,
+                            dropout=self.dropout_rate,
                             batch_first=True)
 
         # you may or may not need to do this, LSTM does not work on GPU for me
@@ -237,11 +238,157 @@ class FullLSTM2LSharpeLoss(nn.Module):
         if self.num_layers > 1:
             self.dropout_rate = dropout_rate
         else:
-            self.dropout = None
+            self.dropout_rate = None
+
         self.lstm = nn.LSTM(input_size=self.input_dim,
                             hidden_size=self.hidden_dim,
                             num_layers=self.num_layers,
-                            dropout=self.dropout,
+                            dropout=self.dropout_rate,
+                            batch_first=True)
+
+        # you may or may not need to do this, LSTM does not work on GPU for me
+        # and can't fix the bug as of now, params needs to be same memory block
+        # https://discuss.pytorch.org/t/why-do-we-need-flatten-parameters-when-using-rnn-with-dataparallel/46506"
+        self.lstm.flatten_parameters()
+
+        # fully connecte4d block, 2-layer MLP
+        self.fcBlock = nn.Sequential(
+            nn.LazyLinear(self.hidden_dim),
+            nn.Tanh(),
+            nn.Dropout(p=self.dropout_rate),
+            nn.LazyLinear(out_features=1),
+            nn.Tanh())
+
+    def forward(self, inputs):
+        outputs, _ = self.lstm(inputs)
+        outputs = self.fcBlock(outputs)
+        return outputs
+
+class FullLSTM2LRetLoss(nn.Module):
+    def __init__(self, input_dim, hidden_dim, layers=2, dropout_rate=0.30):
+        super(FullLSTM2LRetLoss, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.num_layers = layers
+
+        if self.num_layers > 1:
+            self.dropout_rate = dropout_rate
+        else:
+            self.dropout_rate = None
+
+        self.lstm = nn.LSTM(input_size=self.input_dim,
+                            hidden_size=self.hidden_dim,
+                            num_layers=self.num_layers,
+                            dropout=self.dropout_rate,
+                            batch_first=True)
+
+        # you may or may not need to do this, LSTM does not work on GPU for me
+        # and can't fix the bug as of now, params needs to be same memory block
+        # https://discuss.pytorch.org/t/why-do-we-need-flatten-parameters-when-using-rnn-with-dataparallel/46506"
+        self.lstm.flatten_parameters()
+
+        # fully connecte4d block, 2-layer MLP
+        self.fcBlock = nn.Sequential(
+            nn.LazyLinear(self.hidden_dim),
+            nn.Tanh(),
+            nn.Dropout(p=self.dropout_rate),
+            nn.LazyLinear(out_features=1),
+            nn.Tanh())
+
+    def forward(self, inputs):
+        outputs, _ = self.lstm(inputs)
+        outputs = self.fcBlock(outputs)
+        return outputs
+
+class FullLSTM2LRegressionLoss(nn.Module):
+    def __init__(self, input_dim, hidden_dim, layers=2, dropout_rate=0.30):
+        super(FullLSTM2LRegressionLoss, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.num_layers = layers
+
+        if self.num_layers > 1:
+            self.dropout_rate = dropout_rate
+        else:
+            self.dropout_rate = None
+
+        self.lstm = nn.LSTM(input_size=self.input_dim,
+                            hidden_size=self.hidden_dim,
+                            num_layers=self.num_layers,
+                            dropout=self.dropout_rate,
+                            batch_first=True)
+
+        # you may or may not need to do this, LSTM does not work on GPU for me
+        # and can't fix the bug as of now, params needs to be same memory block
+        # https://discuss.pytorch.org/t/why-do-we-need-flatten-parameters-when-using-rnn-with-dataparallel/46506"
+        self.lstm.flatten_parameters()
+
+        # fully connecte4d block, 2-layer MLP
+        self.fcBlock = nn.Sequential(
+            nn.LazyLinear(self.hidden_dim),
+            nn.Tanh(),
+            nn.Dropout(p=self.dropout_rate),
+            nn.LazyLinear(out_features=1),
+            # nn.Tanh()
+            )
+
+    def forward(self, inputs):
+        outputs, _ = self.lstm(inputs)
+        outputs = self.fcBlock(outputs)
+        return outputs
+
+class FullLSTM2LBinaryClassificationLoss(nn.Module):
+    def __init__(self, input_dim, hidden_dim, layers=2, dropout_rate=0.30):
+        super(FullLSTM2LBinaryClassificationLoss, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.num_layers = layers
+
+        if self.num_layers > 1:
+            self.dropout_rate = dropout_rate
+        else:
+            self.dropout_rate = None
+
+        self.lstm = nn.LSTM(input_size=self.input_dim,
+                            hidden_size=self.hidden_dim,
+                            num_layers=self.num_layers,
+                            dropout=self.dropout_rate,
+                            batch_first=True)
+
+        # you may or may not need to do this, LSTM does not work on GPU for me
+        # and can't fix the bug as of now, params needs to be same memory block
+        # https://discuss.pytorch.org/t/why-do-we-need-flatten-parameters-when-using-rnn-with-dataparallel/46506"
+        self.lstm.flatten_parameters()
+
+        # fully connecte4d block, 2-layer MLP
+        self.fcBlock = nn.Sequential(
+            nn.LazyLinear(self.hidden_dim),
+            nn.Tanh(),
+            nn.Dropout(p=self.dropout_rate),
+            nn.LazyLinear(out_features=1),
+            nn.Sigmoid())
+
+    def forward(self, inputs):
+        outputs, _ = self.lstm(inputs)
+        outputs = self.fcBlock(outputs)
+        return outputs
+
+class FullLSTM2LSharpeLossCustom(nn.Module):
+    def __init__(self, input_dim, hidden_dim, layers=2, dropout_rate=0.30):
+        super(FullLSTM2LSharpeLossCustom, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.num_layers = layers
+
+        if self.num_layers > 1:
+            self.dropout_rate = dropout_rate
+        else:
+            self.dropout_rate = None
+
+        self.lstm = nn.LSTM(input_size=self.input_dim,
+                            hidden_size=self.hidden_dim,
+                            num_layers=self.num_layers,
+                            dropout=self.dropout_rate,
                             batch_first=True)
 
         # you may or may not need to do this, LSTM does not work on GPU for me

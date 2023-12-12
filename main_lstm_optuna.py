@@ -49,6 +49,8 @@ n_trials = int(sys.argv[4])
 n_jobs = int(sys.argv[5])
 max_epochs = int(sys.argv[6])
 sampler_type = sys.argv[7]
+train_pct = float(sys.argv[8])
+save_best_val_model = eval(sys.argv[9])
 
 # batch_size_space = [128, 256, 512, 1024]
 batch_size_space = [256, 512, 1024, 2048]
@@ -60,7 +62,7 @@ print(model_name, loss_func_name, gpu, n_trials, n_jobs, max_epochs)
 ##########################################################
 # Create directory to store data
 ##########################################################
-filename = model_name + "_" + loss_func_name + "_" + sampler_type + "_" + str(max_epochs)
+filename = model_name + "_" + loss_func_name + "_" + sampler_type + "_" + str(max_epochs) + "_" + str(train_pct)+ "_" + str(save_best_val_model)
 
 now = datetime.now(tz=pytz.utc)
 now = now.astimezone(timezone('US/Pacific'))
@@ -151,24 +153,31 @@ def run_train(params):
         else:
             early_stop_count += 1
 
-        # if val_loss < global_val_loss:
-        #     global_val_loss = val_loss
+        if save_best_val_model:
+            if val_loss < global_val_loss:
+                global_val_loss = val_loss
+                best_model = copy.deepcopy(model)
+                torch.save(best_model, model_path + str(idx) + '.pt')
+                best_model_state = copy.deepcopy(best_model.state_dict())
+                torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
+                learning_curves_global = learning_curves
 
         # print(epoch, "Training Loss: %.4f. Validation Loss: %.4f. " % (train_loss, val_loss))
 
         if early_stop_count == early_stopping:
             break
 
-    if val_loss < global_val_loss:
-        global_val_loss = val_loss
+    if not save_best_val_model:
+        if val_loss < global_val_loss:
+            global_val_loss = val_loss
 
-    # if global_val_loss == best_val_loss:
-    if global_val_loss == val_loss:
-        best_model = copy.deepcopy(model)
-        torch.save(best_model, model_path + str(idx) + '.pt')
-        best_model_state = copy.deepcopy(best_model.state_dict())
-        torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
-        learning_curves_global = learning_curves
+        # if global_val_loss == best_val_loss:
+        if global_val_loss == val_loss:
+            best_model = copy.deepcopy(model)
+            torch.save(best_model, model_path + str(idx) + '.pt')
+            best_model_state = copy.deepcopy(best_model.state_dict())
+            torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
+            learning_curves_global = learning_curves
 
     return best_val_loss
 
@@ -176,7 +185,6 @@ def objective(trial):
 
     batch_size = trial.suggest_categorical('batch_size', batch_size_space)
     hidden_size = trial.suggest_categorical('hidden_size', hidden_size_space)
-    # learning_rate = trial.suggest_loguniform("learning_rate", 10 ** -5, 10 ** -1)
     learning_rate = trial.suggest_loguniform("learning_rate", 10 ** -4, 10 ** -2)
     maximum_gradient_norm = trial.suggest_loguniform("maximum_gradient_norm", 10 ** -3, 10 ** -1)
     dropout = trial.suggest_uniform("dropout", 0.2, 0.4)
@@ -261,7 +269,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     X_test, y_test = test[PAPER_BASE_FEATS], test[target]
 
     # validation split
-    X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
+    X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train, train_pct)
 
     # scale the data
     scaler = RobustScaler()

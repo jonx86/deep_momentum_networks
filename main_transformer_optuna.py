@@ -42,24 +42,27 @@ seed_torch(0)
 
 # Example: python main_lstm_optuna.py simpleLSTM SharpeLoss cuda:0 50 4
 
-model_name = sys.argv[1]
+model_name_base = sys.argv[1]
 loss_func_name = sys.argv[2]
 gpu = sys.argv[3]
 n_trials = int(sys.argv[4])
 n_jobs = int(sys.argv[5])
 max_epochs = int(sys.argv[6])
 sampler_type = sys.argv[7]
+train_pct = float(sys.argv[8])
+save_best_val_model = eval(sys.argv[9])
 
-batch_size_space = [128, 256, 512, 1024]
-hidden_size_space = [12, 24, 48]
+batch_size_space = [256, 512, 1024, 2048]
+# hidden_size_space = [12, 24, 48]
+hidden_size_space = [10, 20, 40]
 weight_space = [0.6, 0.55, 0.5, 0.45, 0.4]
 
-print(model_name, loss_func_name, gpu, n_trials, n_jobs, max_epochs)
+print(model_name_base, loss_func_name, gpu, n_trials, n_jobs, max_epochs)
 
 ##########################################################
 # Create directory to store data
 ##########################################################
-filename = model_name + "_" + loss_func_name + "_" + sampler_type + "_" + str(max_epochs)
+filename = model_name_base + "_" + loss_func_name + "_" + sampler_type + "_" + str(max_epochs) + "_" + str(train_pct)+ "_" + str(save_best_val_model)
 
 now = datetime.now(tz=pytz.utc)
 now = now.astimezone(timezone('US/Pacific'))
@@ -70,7 +73,7 @@ if not os.path.exists(loc_files):
 
 outfile = open(loc_files + filename + ".txt", "w")
 outfile_best_param = open(loc_files + "best_params_" + filename + ".txt", "w")
-model_name = model_name + loss_func_name
+model_name = model_name_base + loss_func_name
 
 model_path = loc_files + filename + '_model_'
 cv_global = 0
@@ -90,7 +93,7 @@ def run_train(params):
     early_stopping = 25
     input_dim = 8
     maximum_length = 63
-    number_of_heads =  4
+    number_of_heads = 2
     number_of_encoder_layers = 1
     learning_rate = params['learning_rate']
     maximum_gradient_norm = params['maximum_gradient_norm']
@@ -157,20 +160,31 @@ def run_train(params):
         else:
             early_stop_count += 1
 
-        if val_loss < global_val_loss:
-            global_val_loss = val_loss
+        if save_best_val_model:
+            if val_loss < global_val_loss:
+                global_val_loss = val_loss
+                best_model = copy.deepcopy(model)
+                torch.save(best_model, model_path + str(idx) + '.pt')
+                best_model_state = copy.deepcopy(best_model.state_dict())
+                torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
+                learning_curves_global = learning_curves
 
         # print(epoch, "Training Loss: %.4f. Validation Loss: %.4f. " % (train_loss, val_loss))
 
         if early_stop_count == early_stopping:
             break
 
-    if global_val_loss == best_val_loss:
-        best_model = copy.deepcopy(model)
-        torch.save(best_model, model_path + str(idx) + '.pt')
-        best_model_state = copy.deepcopy(best_model.state_dict())
-        torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
-        learning_curves_global = learning_curves
+    if not save_best_val_model:
+        if val_loss < global_val_loss:
+            global_val_loss = val_loss
+
+        # if global_val_loss == best_val_loss:
+        if global_val_loss == val_loss:
+            best_model = copy.deepcopy(model)
+            torch.save(best_model, model_path + str(idx) + '.pt')
+            best_model_state = copy.deepcopy(best_model.state_dict())
+            torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
+            learning_curves_global = learning_curves
 
     return best_val_loss
 
@@ -178,7 +192,7 @@ def objective(trial):
 
     batch_size = trial.suggest_categorical('batch_size', batch_size_space)
     hidden_size = trial.suggest_categorical('hidden_size', hidden_size_space)
-    learning_rate = trial.suggest_loguniform("learning_rate", 10 ** -5, 10 ** -1)
+    learning_rate = trial.suggest_loguniform("learning_rate", 10 ** -4, 10 ** -2)
     maximum_gradient_norm = trial.suggest_loguniform("maximum_gradient_norm", 10 ** -3, 10 ** -1)
     dropout = trial.suggest_uniform("dropout", 0.2, 0.4)
 
@@ -232,7 +246,7 @@ prep = PrePTestSeqData(X)
 # don't need to look back a small window into train set
 
 SEC_LEN = 63
-FILENAME = f"xs_{SEC_LEN}.pickle"  # incase we want to test different sequence lenghts
+FILENAME = f"xs_{SEC_LEN}_{model_name_base}.pickle"  # incase we want to test different sequence lenghts
 
 try:
     with open(FILENAME, "rb") as f:
@@ -245,7 +259,6 @@ except Exception:
                                    step_size=SEC_LEN,
                                    return_seq_target=True,
                                    lstm=True)
-
         with open(FILENAME, "wb") as f:
                 pickle.dump(newX, f)
                 print("dumped file")
@@ -262,7 +275,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     X_test, y_test = test[PAPER_BASE_FEATS], test[target]
 
     # validation split
-    X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
+    X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train, train_pct)
 
     # scale the data
     scaler = RobustScaler()
@@ -278,14 +291,14 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                     step_size=SEC_LEN,
                                     return_pandas=False,
                                     lstm=True,
-                                    return_seq_target=True)
+                                    return_seq_target=False)
 
     X_train2, y_train2 = split_Xy_for_seq(X_train=X_train2,
                                           y_train=y_train2,
                                           step_size=SEC_LEN,
                                           return_pandas=False,
                                           lstm=True,
-                                          return_seq_target=True)
+                                          return_seq_target=False)
 
     global_val_loss = float('inf')
     best_params = run_hyper_parameter_tuning()
@@ -336,7 +349,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     with torch.no_grad():
         model.eval()
         # feed in sequences for each future and get the predictions, take just the last time-step
-        preds = aggregate_seq_preds(model, scaler, xs1, features=PAPER_BASE_FEATS, device=gpu, lstm=True, seq_out=True, n_jobs=2)
+        preds = aggregate_seq_preds(model, scaler, xs1, features=PAPER_BASE_FEATS, device=gpu, lstm=True, seq_out=False, n_jobs=2)
         if loss_func_name == 'RegressionLoss':
             preds = np.sign(preds)
         if loss_func_name == 'BinaryClassificationLoss':

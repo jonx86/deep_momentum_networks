@@ -173,3 +173,186 @@ class WaveNetSharpeLoss(nn.Module):
         skip_connections = self.flattener(skip_connections)
         skip_connections = self.fcBlock(skip_connections)
         return skip_connections
+
+class WaveNetRetLoss(nn.Module):
+
+    def __init__(self, in_channels, out_channels, kernal_size, hidden_size, dropOutRate=.30, device='cuda'):
+        super(WaveNetRetLoss, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernal_size = kernal_size
+        self.hidden_size = hidden_size
+        self.dropOutRate = dropOutRate
+        self.device = device
+
+        self.CausalConvFirst = CausalConv1d(in_channels=self.in_channels,
+                                            out_channels=self.out_channels,
+                                            kernel_size=self.kernal_size,
+                                            dilation=1, device=self.device)
+
+        self.ResStacks = ResStack(in_channels=self.out_channels,
+                                  out_channels=self.out_channels,
+                                  kernel_size=2, device=device)
+
+        self.tanh1 = nn.Tanh()
+
+        # drop out
+        self.drop1 = nn.Dropout(p=self.dropOutRate)
+        self.flattener = nn.Flatten()
+
+        # last we have our full connected block
+        self.fcBlock = FullyConnectedBlock(hidden=self.hidden_size,
+                                           out_dim=1,
+                                           dropout_rate=self.dropOutRate)
+
+    def forward(self, inputs):
+        # pass through the first casual convolutional layer
+        outputs = self.CausalConvFirst(inputs)
+
+        # now we go into the residual block
+        skip_connections = self.ResStacks(outputs)
+        skip_connections = torch.sum(skip_connections, dim=0)
+        skip_connections = self.tanh1(skip_connections)
+
+        # flatten before last fully connected layer
+        skip_connections = self.flattener(skip_connections)
+        skip_connections = self.fcBlock(skip_connections)
+        return skip_connections
+
+class WaveNetRegressionLoss(nn.Module):
+
+    def __init__(self, in_channels, out_channels, kernal_size, hidden_size, dropOutRate=.30, device='cuda'):
+        super(WaveNetRegressionLoss, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernal_size = kernal_size
+        self.hidden_size = hidden_size
+        self.dropOutRate = dropOutRate
+        self.device = device
+
+        self.CausalConvFirst = CausalConv1d(in_channels=self.in_channels,
+                                            out_channels=self.out_channels,
+                                            kernel_size=self.kernal_size,
+                                            dilation=1, device=self.device)
+
+        self.ResStacks = ResStack(in_channels=self.out_channels,
+                                  out_channels=self.out_channels,
+                                  kernel_size=2, device=device)
+
+        self.tanh1 = nn.Tanh()
+
+        # drop out
+        self.drop1 = nn.Dropout(p=self.dropOutRate)
+        self.flattener = nn.Flatten()
+
+        # last we have our full connected block
+        self.fcBlock = FullyConnectedBlock(hidden=self.hidden_size,
+                                           out_dim=1,
+                                           dropout_rate=self.dropOutRate)
+
+    def forward(self, inputs):
+        # pass through the first casual convolutional layer
+        outputs = self.CausalConvFirst(inputs)
+
+        # now we go into the residual block
+        skip_connections = self.ResStacks(outputs)
+        skip_connections = torch.sum(skip_connections, dim=0)
+
+        # flatten before last fully connected layer
+        skip_connections = self.flattener(skip_connections)
+        skip_connections = self.fcBlock(skip_connections)
+        return skip_connections
+
+class WaveNetBinaryClassificationLoss(nn.Module):
+
+    def __init__(self, in_channels, out_channels, kernal_size, hidden_size, dropOutRate=.30, device='cuda'):
+        super(WaveNetBinaryClassificationLoss, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernal_size = kernal_size
+        self.hidden_size = hidden_size
+        self.dropOutRate = dropOutRate
+        self.device = device
+
+        self.CausalConvFirst = CausalConv1d(in_channels=self.in_channels,
+                                            out_channels=self.out_channels,
+                                            kernel_size=self.kernal_size,
+                                            dilation=1, device=self.device)
+
+        self.ResStacks = ResStack(in_channels=self.out_channels,
+                                  out_channels=self.out_channels,
+                                  kernel_size=2, device=device)
+
+        self.tanh1 = nn.Tanh()
+        self.sigmoid = nn.Sigmoid()
+
+        # drop out
+        self.drop1 = nn.Dropout(p=self.dropOutRate)
+        self.flattener = nn.Flatten()
+
+        # last we have our full connected block
+        self.fcBlock = FullyConnectedBlock(hidden=self.hidden_size,
+                                           out_dim=1,
+                                           dropout_rate=self.dropOutRate)
+
+    def forward(self, inputs):
+        # pass through the first casual convolutional layer
+        outputs = self.CausalConvFirst(inputs)
+
+        # now we go into the residual block
+        skip_connections = self.ResStacks(outputs)
+        skip_connections = torch.sum(skip_connections, dim=0)
+        # skip_connections = self.tanh1(skip_connections)
+        # skip_connections = self.sigmoid(skip_connections)
+
+
+        # flatten before last fully connected layer
+        skip_connections = self.flattener(skip_connections)
+        skip_connections = self.fcBlock(skip_connections)
+        skip_connections = torch.sigmoid(skip_connections)
+        return skip_connections
+
+class WaveNetSharpeLossCustom(nn.Module):
+
+    def __init__(self, in_channels, out_channels, kernal_size, hidden_size, dropOutRate=.30, device='cuda'):
+        super(WaveNetSharpeLossCustom, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernal_size = kernal_size
+        self.hidden_size = hidden_size
+        self.dropOutRate = dropOutRate
+        self.device = device
+
+        self.CausalConvFirst = CausalConv1d(in_channels=self.in_channels,
+                                            out_channels=self.out_channels,
+                                            kernel_size=self.kernal_size,
+                                            dilation=1, device=self.device)
+
+        self.ResStacks = ResStack(in_channels=self.out_channels,
+                                  out_channels=self.out_channels,
+                                  kernel_size=2, device=device)
+
+        self.tanh1 = nn.Tanh()
+
+        # drop out
+        self.drop1 = nn.Dropout(p=self.dropOutRate)
+        self.flattener = nn.Flatten()
+
+        # last we have our full connected block
+        self.fcBlock = FullyConnectedBlock(hidden=self.hidden_size,
+                                           out_dim=1,
+                                           dropout_rate=self.dropOutRate)
+
+    def forward(self, inputs):
+        # pass through the first casual convolutional layer
+        outputs = self.CausalConvFirst(inputs)
+
+        # now we go into the residual block
+        skip_connections = self.ResStacks(outputs)
+        skip_connections = torch.sum(skip_connections, dim=0)
+        skip_connections = self.tanh1(skip_connections)
+
+        # flatten before last fully connected layer
+        skip_connections = self.flattener(skip_connections)
+        skip_connections = self.fcBlock(skip_connections)
+        return skip_connections

@@ -20,21 +20,13 @@ from utils.utils import *
 import optuna
 import os, glob, sys
 import random
+from joblib.externals.loky import get_reusable_executor
 
 import warnings
 warnings.filterwarnings("ignore")
 
 ############## SET SEED ##############
-def seed_torch(seed=0):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = True
-
-seed_torch(0)
-
+torch.manual_seed(0)
 ##########################################################
 # Parameters
 ##########################################################
@@ -48,39 +40,36 @@ n_trials = int(sys.argv[4])
 n_jobs = int(sys.argv[5])
 max_epochs = int(sys.argv[6])
 sampler_type = sys.argv[7]
+train_pct = float(sys.argv[8])
+save_best_val_model = eval(sys.argv[9])
 
-batch_size_space = [256, 512, 1024, 2048]
-learning_rate_space = [10**-5, 10**-4, 10**-3, 10**-2, 10**-1, 10**0]
-maximum_gradient_norm_space = [10**-4, 10**-3, 10**-2, 10**-1, 10**0, 10**1]
-hidden_size_space = [5, 10, 20, 40, 80]
-dropout_space = [0.1, 0.2, 0.3, 0.4, 0.5]
-weight_space = [0.6, 0.55, 0.5, 0.45, 0.4]
+# batch_size_space = [256, 512, 1024, 2048]
+# hidden_size_space = [10, 20, 40]
+# weight_space = [0.6, 0.55, 0.5, 0.45, 0.4]
+
+batch_size_space = [512]
+hidden_size_space = [40]
+weight_space = [0.6]
 
 print(model_name, loss_func_name, gpu, n_trials, n_jobs, max_epochs)
 
 ##########################################################
 # Create directory to store data
 ##########################################################
-filename = model_name + "_" + loss_func_name + "_" + sampler_type + "_" + str(max_epochs)
+filename = model_name + "_" + loss_func_name + "_" + sampler_type + "_" + str(max_epochs) + "_" + str(train_pct)+ "_" + str(save_best_val_model)
 
 now = datetime.now(tz=pytz.utc)
 now = now.astimezone(timezone('US/Pacific'))
 data_str = now.strftime("%m%d") + "_" + now.strftime('%H%M%S')
-loc_results = "files/" + filename + "_" + data_str + "/"
-loc_weights = "files/" + filename + "_" + data_str + "/"
-loc_images = "files/" + filename + "_" + data_str + "/"
-if not os.path.exists(loc_results):
-    os.makedirs(loc_results)
-if not os.path.exists(loc_weights):
-    os.makedirs(loc_weights)
-if not os.path.exists(loc_images):
-    os.makedirs(loc_images)
+loc_files = "files/" + filename + "_" + data_str + "/"
+if not os.path.exists(loc_files):
+    os.makedirs(loc_files)
 
-outfile = open(loc_results + filename + ".txt", "w")
-outfile_best_param = open(loc_results + "best_params_" + filename + ".txt", "w")
+outfile = open(loc_files + filename + ".txt", "w")
+outfile_best_param = open(loc_files + "best_params_" + filename + ".txt", "w")
 model_name = model_name + loss_func_name
 
-model_path = loc_weights + filename + '_model_'
+model_path = loc_files + filename + '_model_'
 cv_global = 0
 
 ##########################################################
@@ -94,12 +83,11 @@ def run_train(params):
     global learning_curves_global
 
     batch_size = params['batch_size']
-    epochs = 100
+    epochs = max_epochs
     early_stopping = 25
-    in_channels = 60
-    out_channels = 3
+    in_channels = 48
+    out_channels = params['hidden_size']
     kernal_size = 2
-    dilations = [5, 10, 15, 21, 42]
     learning_rate = params['learning_rate']
     maximum_gradient_norm = params['maximum_gradient_norm']
 
@@ -107,8 +95,6 @@ def run_train(params):
         'in_channels': in_channels,
         'out_channels': out_channels,
         'kernal_size': kernal_size,
-        'num_layers': dilations,
-        'num_stacks': 1,
         'hidden_size': params['hidden_size'],
         'dropOutRate': params['dropout'],
         'device': gpu
@@ -127,9 +113,10 @@ def run_train(params):
     model = model(**model_params)
     model.to(gpu)
     # print(model)
+    print(params)
 
     optimizer = Adam(model.parameters(), lr=learning_rate)
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=True)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=False)
     loss_func = getattr(L, loss_func_name)
     if loss_func_name == "SharpeLossCustom":
         loss_func = loss_func(params['weight'])
@@ -165,28 +152,44 @@ def run_train(params):
         else:
             early_stop_count += 1
 
+        if save_best_val_model:
+            if val_loss < global_val_loss:
+                global_val_loss = val_loss
+                best_model = copy.deepcopy(model)
+                torch.save(best_model, model_path + str(idx) + '.pt')
+                best_model_state = copy.deepcopy(best_model.state_dict())
+                torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
+                learning_curves_global = learning_curves
+
+        print(epoch, "Training Loss: %.4f. Validation Loss: %.4f. " % (train_loss, val_loss), (time.time() - start_time) / 60)
+
+        if early_stop_count == early_stopping:
+            break
+
+    if not save_best_val_model:
         if val_loss < global_val_loss:
             global_val_loss = val_loss
+
+        # if global_val_loss == best_val_loss:
+        if global_val_loss == val_loss:
             best_model = copy.deepcopy(model)
             torch.save(best_model, model_path + str(idx) + '.pt')
             best_model_state = copy.deepcopy(best_model.state_dict())
             torch.save(best_model_state, model_path + str(idx) + '_state_dict.pt')
             learning_curves_global = learning_curves
 
-        # print(epoch, "Training Loss: %.4f. Validation Loss: %.4f. " % (train_loss, val_loss))
-
-        if early_stop_count == early_stopping:
-            break
-
     return best_val_loss
 
 def objective(trial):
 
     batch_size = trial.suggest_categorical('batch_size', batch_size_space)
-    learning_rate = trial.suggest_categorical('learning_rate', learning_rate_space)
-    maximum_gradient_norm = trial.suggest_categorical('maximum_gradient_norm', maximum_gradient_norm_space)
     hidden_size = trial.suggest_categorical('hidden_size', hidden_size_space)
-    dropout = trial.suggest_categorical('dropout', dropout_space)
+    # learning_rate = trial.suggest_loguniform("learning_rate", 10 ** -4, 10 ** -2)
+    # maximum_gradient_norm = trial.suggest_loguniform("maximum_gradient_norm", 10 ** -3, 10 ** -1)
+    # dropout = trial.suggest_uniform("dropout", 0.2, 0.4)
+    learning_rate = trial.suggest_loguniform("learning_rate", 10 ** -3, 10 ** -3)
+    maximum_gradient_norm = trial.suggest_loguniform("maximum_gradient_norm", 10 ** -3, 10 ** -3)
+    dropout = trial.suggest_uniform("dropout", 0.2, 0.2)
 
     params = {
         'batch_size': batch_size,
@@ -221,16 +224,13 @@ def run_hyper_parameter_tuning():
 data = load_features()
 
 # create the additional lags shown in the paper
-
-features = [f for f in data.columns if f.startswith('feature')]
-lags = [l for l in data.columns if l.startswith('lag')]
+features = MLP_FEATURES
 target = ['target']
-both = features+target+lags
+both = features+target
 
 full = data[both].dropna(subset=both)
 print(full.shape)
 X = full[both]
-features+=lags
 
 for modelname in glob.glob(model_path + "*"):
     print("removed", modelname)
@@ -255,7 +255,7 @@ try:
                   newX = pickle.load(f)
                   print(f"Loading pickle took: {time.time() - start}")
 except Exception:
-      newX, _ = split_Xy_for_seq(X[features], X['target'],
+      newX, _ = split_Xy_for_seq(X[MLP_FEATURES], X['target'],
                                   step_size=SEC_LEN,
                                   return_pandas=True,
                                   return_seq_target=False,
@@ -273,11 +273,11 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     train_losses = AverageMeter()
 
     # break out X and y train
-    X_train, y_train = train[features], train[target]
-    X_test, y_test = test[features], test[target]
+    X_train, y_train = train[MLP_FEATURES], train[target]
+    X_test, y_test = test[MLP_FEATURES], test[target]
 
     # validation split
-    X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
+    X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train, train_pct)
 
     # scale the data
     scaler = RobustScaler()
@@ -312,7 +312,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
 
     learning_curves_global.plot()
     plt.title(f'CV Split: {idx}')
-    plt.savefig(loc_images + filename + f'_learning_curves_{idx}.png')
+    plt.savefig(loc_files + filename + f'_learning_curves_{idx}.png')
     plt.clf()
 
     # export the best parameters
@@ -323,22 +323,48 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     test_start, test_end = X_test.index.get_level_values('date')[0], X_test.index.get_level_values('date')[-1]
     print(f'Test Start :{test_start} | Test End :{test_end}')
 
-    # we don't need X train anymore
-    del X_train
+    # NOTE get correct test data takes a long time looping through all 72 futures
+    # futures and all over-lapping sequences with in each future
+    # We utilize joblib again to multi-process these batches, looping through sequences within each future
+    # takes ~1.6 minutes on my machine 24-cores
+    # xs1 = mpSplits(prep.split_single_future,
+    #                (test_start, test_end),
+    #                newX, n_jobs=NUM_CORES)
 
-    xs1 = mpSplits(prep.split_single_future,
-                   (test_start, test_end), newX,
-                   n_jobs=NUM_CORES)
+    FILENAME = f"xs_{SEC_LEN}_{MODEL_NAME}_{idx}.pickle"  # incase we want to test different sequence lenghts
+
+    try:
+        with open(FILENAME, "rb") as f:
+            print('loading pickle .....')
+            start = time.time()
+            xs1 = pickle.load(f)
+            print(f"Loading pickle took: {time.time() - start}")
+    except Exception:
+        xs1 = mpSplits(prep.split_single_future,
+                       (test_start, test_end),
+                       newX,
+                       prefer=None,
+                       n_jobs=NUM_CORES)
+
+        with open(FILENAME, "wb") as f:
+            pickle.dump(xs1, f)
+            print("dumped file")
 
     with torch.no_grad():
         model.eval()
         # feed in sequences for each future and get the predictions, take just the last time-step
-        preds = aggregate_seq_preds(model, xs1,
-                                    features=features,
+        preds = aggregate_seq_preds(model, scaler, xs1,
+                                    features=MLP_FEATURES,
                                     device=gpu,
                                     lstm=False,
                                     seq_out=False,
                                     n_jobs=2)
+        get_reusable_executor().shutdown(wait=True)
+        if loss_func_name == 'RegressionLoss':
+            preds = np.sign(preds)
+        if loss_func_name == 'BinaryClassificationLoss':
+            preds -= .50
+            preds = np.sign(preds)
 
         preds = preds.to_frame(model_name)
         predictions.append(preds)
@@ -346,20 +372,20 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     cv_global += 1
     preds=pd.concat([predictions[idx]]).sort_index()
     new_dataset = data.copy()
-    feats = new_dataset.join(preds[[model_name]], how='left')
+    feats = new_dataset.join(preds[model_name], how='left')
     feats.dropna(subset=[model_name], inplace=True)
     dates = feats.index.get_level_values('date').unique().to_list()
-    strat_rets = process_jobs(dates, feats, signal_col=model_name)
+    strat_rets = process_jobs(dates, feats, signal_col=model_name, prefer=None)
     values = get_returns_breakout(strat_rets.fillna(0.0).to_frame(model_name + '_bench'))
-    print('idx: ', idx, file=outfile)
+    print('idx:', idx, 'best_val_loss:', global_val_loss, file=outfile)
     print(values, file=outfile, flush=True)
     print(values)
 
 preds=pd.concat(predictions).sort_index()
-feats = data.join(preds[[model_name]], how='left')
+feats = data.join(preds[model_name], how='left')
 feats.dropna(subset=[model_name], inplace=True)
 dates = feats.index.get_level_values('date').unique().to_list()
-strat_rets = process_jobs(dates, feats, signal_col=model_name)
+strat_rets = process_jobs(dates, feats, signal_col=model_name, prefer=None)
 ret_breakout = get_returns_breakout(strat_rets.fillna(0.0).to_frame(model_name + '_bench'))
 print(ret_breakout)
 print('Final', file=outfile, flush=True)
@@ -368,9 +394,10 @@ print(ret_breakout, file=outfile, flush=True)
 outfile.close()
 outfile_best_param.close()
 
-strat_rets.to_pickle("results/strat_rets_" + filename + ".pkl")
+strat_rets.to_pickle(loc_files + "strat_rets_" + filename + ".pkl")
 
 ax = strat_rets.fillna(0.).cumsum().plot()
-ax.figure.savefig('images/' + filename + '_timeline.png')
+ax.figure.savefig(loc_files + filename + '_timeline.png')
 
+print(data_str)
 print("total time:", (time.time() - start_time) / 60)

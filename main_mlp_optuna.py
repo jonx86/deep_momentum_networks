@@ -51,8 +51,8 @@ n_trials = int(sys.argv[4])
 n_jobs = int(sys.argv[5])
 max_epochs = int(sys.argv[6])
 sampler_type = sys.argv[7]
+train_pct = float(sys.argv[8])
 
-# batch_size_space = [128, 256, 512, 1024]
 batch_size_space = [256, 512, 1024, 2048]
 hidden_size_space = [10, 20, 40]
 weight_space = [0.6, 0.55, 0.5, 0.45, 0.4]
@@ -68,7 +68,7 @@ print(model_name, loss_func_name, gpu, n_trials, n_jobs, max_epochs)
 ##########################################################
 # Create directory to store data
 ##########################################################
-filename = model_name + "_" + loss_func_name + "_" + sampler_type + "_" + str(max_epochs)
+filename = model_name + "_" + loss_func_name + "_" + sampler_type + "_" + str(max_epochs) + "_" + str(train_pct)
 
 now = datetime.now(tz=pytz.utc)
 now = now.astimezone(timezone('US/Pacific'))
@@ -323,7 +323,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
     X_test, y_test = test[MLP_FEATURES], test[target]
 
     # validation split
-    X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
+    X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train, train_pct)
 
     scaler = RobustScaler()
 
