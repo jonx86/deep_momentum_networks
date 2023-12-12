@@ -219,11 +219,11 @@ model_path = 'model_WaveNet.pt'
 MODEL_NAME = 'WaveNet'
 IN_CHANNELS = 48
 HIDDEN_DIM = 40
-OUT_CHANNELS = 2
+OUT_CHANNELS = HIDDEN_DIM
 SEC_LEN=63
-DROPOUT_RATE = .30
+DROPOUT_RATE = .20
 BATCH_SIZE = 512
-EPOCHS = 100
+EPOCHS = 25
 LEARNING_RATE = 1e-3
 DEVICE = 'cuda'
 NUM_CORES = 4 # -1 for all cores, there are 3 multi-processed data aggregate functions, because we need to operate on the future level
@@ -268,7 +268,7 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
        X_test, y_test = test[MLP_FEATURES], test[target]
 
        # validation split
-       X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train)
+       X_train2, X_val, y_train2, y_val = train_val_split(X_train, y_train, train_pct=.80)
 
        # scale the data
        scaler = RobustScaler()
@@ -304,13 +304,14 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
        model = WaveNet(in_channels=IN_CHANNELS,
                        out_channels=OUT_CHANNELS,
                        kernal_size=KERNEL_SIZE,
-                      hidden_size=HIDDEN_DIM,
+                       hidden_size=HIDDEN_DIM,
                        dropOutRate=DROPOUT_RATE)
        
        model.to(torch.device(DEVICE))
        optimizer = Adam(model.parameters(),
                         lr=LEARNING_RATE)
-       scheduler = ReduceLROnPlateau(optimizer, mode='min',
+       scheduler = ReduceLROnPlateau(optimizer,
+                                      mode='min',
                                      factor=.5,
                                      verbose=True)
        loss_fnc = SharpeLoss(risk_trgt=.15)

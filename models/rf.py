@@ -6,7 +6,8 @@ from utils.utils import (get_cv_splits,
                          load_features,
                          train_val_split,
                          process_jobs,
-                         get_returns_breakout)
+                         get_returns_breakout,
+                         PAPER_BASE_FEATS)
 
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import ParameterSampler
@@ -16,25 +17,25 @@ from tqdm import tqdm
 feats = load_features()
 
 # grab the model features and targets
-features = [f for f in feats.columns if f.startswith('feature')]
+features = PAPER_BASE_FEATS
 target = ['target']
 
 # get all
 full = features + target
 
 # condense and group
-X = feats[full].dropna()
-X.dropna(inplace=True)
+X = feats.dropna(subset=full).copy()
+X = X[full]
 
 # set up a base model
 baseRF = RandomForestRegressor(max_depth=5, 
-                               n_estimators=500,
+                               n_estimators=1000,
                                max_features=int(1),
-                               n_jobs=10)
+                               n_jobs=-3)
 
 # simple-grid
-grid = {'n_estimators': np.arange(100, 2000, 100),
-        'max_depth': np.arange(2, 12, 1),
+grid = {'n_estimators': np.arange(100, 1000, 100),
+        'max_depth': [3, 6, 9],
         'max_features': [int(1), 'sqrt'],
         'min_weight_fraction_leaf': np.arange(0.0, 0.05, 0.005)}
 
@@ -93,10 +94,7 @@ feats.dropna(subset=['rf_bin_bm'], inplace=True)
 signal_col = 'rf_bin_bm'
 
 # dates
-dates = feats.index.get_level_values('date').unique().to_list()
-
-# need a 252 day warm up
-dates = dates[252:]
+dates =feats.index.get_level_values('date').unique().to_list()
 
 # back-test, signal_col is the prediction for X, in this case just binary -1, or 1
 strat_rets = process_jobs(dates, feats, signal_col='rf_bin_bm')

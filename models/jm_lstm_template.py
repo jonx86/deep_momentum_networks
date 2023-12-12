@@ -3,10 +3,9 @@ import torch.nn as nn
 import numpy as np
 import pandas as pd
 
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils import clip_grad_norm_
-from sklearn.model_selection import ParameterSampler
 import time
 
 from sklearn.preprocessing import RobustScaler
@@ -18,10 +17,7 @@ import matplotlib.pyplot as plt
 from losses.jm_loss import SharpeLoss, RetLoss
 from models.ryan_transformer import Transformer
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 import time
-from sklearn.model_selection import ParameterSampler
-from models.ryan_transformer_encoder import TransformerEncoder
 
 ############## SET SEED ############## 
 torch.manual_seed(0)
@@ -36,16 +32,16 @@ X = full[both]
 
 
 class simpleLSTM(nn.Module):
-        def __init__(self, input_dim, hidden_dim, layers=2, dropout_rate=.30):
+        def __init__(self, input_dim, hidden_dim, layers=1, dropout_rate=.30):
                 super(simpleLSTM, self).__init__()
                 self.input_dim = input_dim
                 self.hidden_dim = hidden_dim
                 self.num_layers = layers
 
-                if self.num_layers >1:
+                if self.num_layers>1:
                         self.dropout = dropout_rate
                 else:
-                        self.dropout = None
+                        self.dropout = 0.
 
                 self.lstm = nn.LSTM(input_size=self.input_dim,
                                     hidden_size=self.hidden_dim,
@@ -78,7 +74,7 @@ class FullLSTM(nn.Module):
                 if self.num_layers >1:
                         self.dropout = dropout_rate
                 else:
-                        self.dropout = None
+                        self.dropout = 0.
 
                 self.lstm = nn.LSTM(input_size=self.input_dim,
                                     hidden_size=self.hidden_dim,
@@ -112,8 +108,8 @@ HIDDEN_DIM = 20
 INPUT = 8
 SEC_LEN=63
 DROPOUT_RATE = .20
-BATCH_SIZE = 256
-EPOCHS = 50
+BATCH_SIZE = 512
+EPOCHS = 100
 LEARNING_RATE = 1e-3
 DEVICE = 'cpu'
 NUM_CORES = -4 # -1 for all cores, there are 3 multi-processed data aggregate functions, because we need to operate on the future level
@@ -191,11 +187,14 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
                                      batch_size=BATCH_SIZE,
                                      device=DEVICE)
 
-        model = simpleLSTM(input_dim=INPUT, hidden_dim=HIDDEN_DIM, dropout_rate=DROPOUT_RATE)
+        model = simpleLSTM(input_dim=INPUT,
+                           hidden_dim=HIDDEN_DIM,
+                           dropout_rate=DROPOUT_RATE)
         model.to(torch.device(DEVICE))
         
         optimizer = Adam(model.parameters(), lr=LEARNING_RATE)
-        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=.5, verbose=True)
+        scheduler = ReduceLROnPlateau(optimizer, mode='min',
+                                      factor=.5, verbose=True)
         loss_fnc = SharpeLoss(risk_trgt=.15)
         
         early_stop_count = 0
@@ -270,16 +269,15 @@ for idx, (train, test) in enumerate(get_cv_splits(X)):
         strat_rets = process_jobs(dates, feats, signal_col='lstm')
         bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
         print(bt)
-        break
-        
+     
 # run back-test
-# preds = pd.concat(predictions).sort_index()
-# feats = data.join(preds['lstm'], how='left')
-# feats.dropna(subset=['lstm'], inplace=True)
-# dates = feats.index.get_level_values('date').unique().to_list()
-# strat_rets = process_jobs(dates, feats, signal_col='lstm')
-# bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
-# print(bt)
+preds = pd.concat(predictions).sort_index()
+feats = data.join(preds['lstm'], how='left')
+feats.dropna(subset=['lstm'], inplace=True)
+dates = feats.index.get_level_values('date').unique().to_list()
+strat_rets = process_jobs(dates, feats, signal_col='lstm')
+bt = get_returns_breakout(strat_rets.fillna(0.0).to_frame('lstm_test'))
+print(bt)
         
 
       

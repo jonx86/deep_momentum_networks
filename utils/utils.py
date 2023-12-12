@@ -84,6 +84,13 @@ def getPortVol(weights, cov, ann_factor=252):
         return std
 
 
+def build_cov(feats, span=63):
+    cov = feats[['1d_ret']].unstack().ewm(span=span).cov().stack()
+    cov.to_pickle('daily_cov_matrix.pkl')
+    return cov
+
+
+
 def get_ret_single_date(data:pd.DataFrame, date:str, signal_col:str, fwd_ret_col='fwd_ret1d',
                         scale_pf_vol_trgt=True, lookback=252, risk_trgt=.15)->pd.Series:
     """
@@ -361,7 +368,7 @@ def get_cv_splits(feats: pd.DataFrame, split_length: int=252*5):
         yield train, test
 
 
-def train_val_split(X_train: pd.DataFrame, y_train: pd.DataFrame, train_pct=.90):
+def train_val_split(X_train: pd.DataFrame, y_train: pd.DataFrame, train_pct:float=.90):
     # train split
     train_split = round(X_train.shape[0] * train_pct)
 
